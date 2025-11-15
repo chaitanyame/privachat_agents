@@ -43,11 +43,20 @@ certificates
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 .venv/
 venv/
+env/
+ENV/
 *.egg-info/
 build/
 dist/
+.pytest_cache/
+.coverage
+htmlcov/
+*.bak
 pytest_cache/
 
 # Env files
