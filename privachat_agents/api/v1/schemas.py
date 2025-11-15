@@ -1,0 +1,530 @@
+"""API request/response schemas for PrivaChat agent endpoints.
+
+This module defines Pydantic models for API contracts, ensuring type safety
+and validation for all endpoints.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+# ============================================================================
+# Search Endpoint Schemas
+# ============================================================================
+
+
+class SearchRequest(BaseModel):
+    """Request model for /v1/search endpoint.
+
+    Attributes:
+        query: Search query (1-1000 chars)
+        mode: Search mode (speed/balanced/deep, default 'balanced')
+        max_sources: Maximum sources to retrieve (5-50, default 20) - overridden by mode if not specified
+        timeout: Timeout in seconds (10-300, default 60) - overridden by mode if not specified
+        model: LLM model to use (default from config)
+    """
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Search query (supports detailed, structured prompts)",
+        examples=["What is Pydantic AI?"],
+    )
+    mode: Literal["speed", "balanced", "deep"] | None = Field(
+        "balanced",
+        description="Search mode: 'speed' (fast, 5 sources), 'balanced' (default, 10 sources), 'deep' (comprehensive, 20 sources)",
+    )
+    max_sources: int | None = Field(
+        None,
+        ge=5,
+        le=50,
+        description="Maximum number of sources to retrieve (overrides mode default if provided)",
+    )
+    timeout: int | None = Field(
+        None,
+        ge=10,
+        le=300,
+        description="Timeout in seconds (overrides mode default if provided)",
+    )
+    model: str | None = Field(
+        None,
+        description="LLM model to use (e.g., 'google/gemini-2.0-flash-lite-001')",
+    )
+    search_engine: Literal["searxng", "serperdev", "perplexity", "auto"] | None = Field(
+        "auto",
+        description="Search engine backend: 'searxng' (open-source), 'serperdev' (Google API), 'perplexity' (AI-powered), 'auto' (SearXNG + SerperDev + Perplexity fallback)",
+    )
+    prompt_strategy: Literal["static", "dynamic", "auto"] | None = Field(
+        "auto",
+        description="System prompt strategy: 'static' (fixed prompts), 'dynamic' (query-aware prompts), 'auto' (uses ENABLE_DYNAMIC_PROMPTS from config)",
+    )
+    # Enhanced reranking options (experimental)
+    enable_diversity: bool = Field(
+        True,  # ENABLED BY DEFAULT for better result quality
+        description="Enable diversity penalty to reduce duplicate results",
+    )
+    enable_recency: bool = Field(
+        False,
+        description="Enable recency boost for temporal queries (experimental)",
+    )
+    enable_query_aware: bool = Field(
+        False,
+        description="Enable query-aware score adaptations (experimental)",
+    )
+
+    @field_validator("query")
+    @classmethod
+    def query_not_empty(cls, v: str) -> str:
+        """Validate query is not empty or whitespace-only."""
+        if not v.strip():
+            raise ValueError("Query cannot be empty or whitespace-only")
+        return v.strip()
+
+
+class SearchSourceResponse(BaseModel):
+    """Individual search source in response.
+
+    Attributes:
+        title: Source title
+        url: Source URL
+        snippet: Content excerpt
+        relevance: Relevance score from search API (0-1)
+        semantic_score: Cross-encoder reranking score (0-1, optional)
+        final_score: Combined score used for ranking (0-1)
+        source_type: Source category
+    """
+
+    title: str = Field(..., description="Source title")
+    url: str = Field(..., description="Source URL")
+    snippet: str = Field(..., description="Content excerpt")
+    relevance: float = Field(..., ge=0.0, le=1.0, description="Search API relevance score")
+    semantic_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Semantic reranking score"
+    )
+    final_score: float = Field(..., ge=0.0, le=1.0, description="Final ranking score")
+    source_type: Literal["web", "academic", "news"] = Field(..., description="Source category")
+
+
+class SubQueryResponse(BaseModel):
+    """Sub-query generated during decomposition.
+
+    Attributes:
+        query: The sub-query text
+        intent: Query intent classification
+        priority: Execution priority
+    """
+
+    query: str = Field(..., description="Sub-query text")
+    intent: Literal["definition", "factual", "opinion"] = Field(..., description="Query intent")
+    priority: int = Field(..., ge=1, le=10, description="Execution priority")
+
+
+class SearchResponse(BaseModel):
+    """Response model for /v1/search endpoint.
+
+    Attributes:
+        session_id: Unique session identifier
+        query: Original search query
+        answer: AI-generated answer based on sources
+        sub_queries: Decomposed sub-queries
+        sources: Retrieved sources
+        mode: Search mode used (speed/balanced/deep)
+        execution_time: Total execution time (seconds)
+        confidence: Result confidence (0-1)
+        model_used: LLM model used
+        trace_url: Langfuse trace URL (if available)
+        grounding_score: Hallucination detection score (0-1, higher = better)
+        hallucination_count: Number of unsupported claims detected
+        created_at: Response timestamp
+    """
+
+    session_id: uuid.UUID = Field(..., description="Session identifier")
+    query: str = Field(..., description="Original search query")
+    answer: str = Field(..., description="AI-generated answer based on sources")
+    sub_queries: list[SubQueryResponse] = Field(..., description="Decomposed sub-queries")
+    sources: list[SearchSourceResponse] = Field(..., description="Retrieved sources")
+    mode: str = Field("balanced", description="Search mode used (speed/balanced/deep)")
+    execution_time: float = Field(..., ge=0.0, description="Execution time (seconds)")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Result confidence")
+    model_used: str = Field(..., description="LLM model used")
+    trace_url: str | None = Field(None, description="Langfuse trace URL")
+    grounding_score: float | None = Field(
+        None, ge=0.0, le=1.0, description="Hallucination detection score (0-1)"
+    )
+    hallucination_count: int | None = Field(
+        None, ge=0, description="Number of unsupported claims detected"
+    )
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+
+
+# ============================================================================
+# Research Endpoint Schemas
+# ============================================================================
+
+
+class ResearchRequest(BaseModel):
+    """Request model for /v1/research endpoint.
+
+    Attributes:
+        query: Research question (1-1000 chars)
+        mode: Search mode (speed/balanced/deep, default 'balanced')
+        max_iterations: Maximum research iterations (1-10, default 5)
+        timeout: Timeout in seconds (60-600, default 300) - overridden by mode if not specified
+        model: LLM model to use (default from config)
+    """
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Research question (supports detailed, structured prompts)",
+        examples=["What are AI agents and how do they work?"],
+    )
+    mode: Literal["speed", "balanced", "deep"] | None = Field(
+        "balanced",
+        description="Search mode: 'speed' (fast, 5 sources), 'balanced' (default, 10 sources), 'deep' (comprehensive, 20 sources)",
+    )
+    max_iterations: int = Field(
+        5,
+        ge=1,
+        le=10,
+        description="Maximum research iterations",
+    )
+    timeout: int | None = Field(
+        None,
+        ge=60,
+        le=600,
+        description="Timeout in seconds (overrides mode default if provided)",
+    )
+    model: str | None = Field(
+        None,
+        description="LLM model to use (e.g., 'google/gemini-2.0-flash-lite-001')",
+    )
+    prompt_strategy: Literal["static", "dynamic", "auto"] | None = Field(
+        "auto",
+        description="System prompt strategy: 'static' (fixed prompts), 'dynamic' (query-aware prompts), 'auto' (uses ENABLE_DYNAMIC_PROMPTS from config)",
+    )
+
+    @field_validator("query")
+    @classmethod
+    def query_not_empty(cls, v: str) -> str:
+        """Validate query is not empty or whitespace-only."""
+        if not v.strip():
+            raise ValueError("Query cannot be empty or whitespace-only")
+        return v.strip()
+
+
+class ResearchStepResponse(BaseModel):
+    """Individual research step in plan.
+
+    Attributes:
+        step_number: Step number (1-based)
+        description: Step description
+        search_query: Query for search agent
+        expected_outcome: Expected result
+        depends_on: Prerequisite step numbers
+    """
+
+    step_number: int = Field(..., ge=1, description="Step number")
+    description: str = Field(..., description="Step description")
+    search_query: str = Field(..., description="Search query")
+    expected_outcome: str = Field(..., description="Expected result")
+    depends_on: list[int] = Field(default_factory=list, description="Prerequisite steps")
+
+
+class ResearchPlanResponse(BaseModel):
+    """Research plan in response.
+
+    Attributes:
+        original_query: User's original query
+        steps: Research steps
+        estimated_time: Time estimate (seconds)
+        complexity: Difficulty classification
+    """
+
+    original_query: str = Field(..., description="Original query")
+    steps: list[ResearchStepResponse] = Field(..., description="Research steps")
+    estimated_time: float = Field(..., ge=0.0, description="Time estimate (seconds)")
+    complexity: Literal["simple", "moderate", "complex"] = Field(
+        ..., description="Difficulty level"
+    )
+
+
+class CitationResponse(BaseModel):
+    """Citation in research output.
+
+    Attributes:
+        source_id: Unique source identifier
+        title: Source title
+        url: Source URL
+        excerpt: Relevant excerpt
+        relevance: Relevance score (0-1)
+    """
+
+    source_id: str = Field(..., description="Source identifier")
+    title: str = Field(..., description="Source title")
+    url: str = Field(..., description="Source URL")
+    excerpt: str = Field(..., description="Relevant excerpt")
+    relevance: float = Field(..., ge=0.0, le=1.0, description="Relevance score")
+
+
+class ResearchResponse(BaseModel):
+    """Response model for /v1/research endpoint.
+
+    Attributes:
+        session_id: Unique session identifier
+        query: Original research question
+        plan: Execution plan
+        findings: Synthesized research findings
+        citations: Source citations
+        confidence: Result confidence (0-1)
+        execution_time: Total execution time (seconds)
+        execution_steps: Detailed execution log
+        model_used: LLM model used
+        trace_url: Langfuse trace URL (if available)
+        created_at: Response timestamp
+    """
+
+    session_id: uuid.UUID = Field(..., description="Session identifier")
+    query: str = Field(..., description="Original research question")
+    plan: ResearchPlanResponse = Field(..., description="Execution plan")
+    findings: str = Field(..., min_length=100, description="Synthesized findings")
+    citations: list[CitationResponse] = Field(..., min_length=3, description="Source citations")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Result confidence (0-1)")
+    execution_time: float = Field(..., ge=0.0, description="Execution time (seconds)")
+    execution_steps: list[dict[str, Any]] = Field(..., description="Execution log details")
+    model_used: str = Field(..., description="LLM model used")
+    trace_url: str | None = Field(None, description="Langfuse trace URL")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+
+
+# ============================================================================
+# Session Endpoint Schemas
+# ============================================================================
+
+
+class SessionResponse(BaseModel):
+    """Response model for /v1/sessions/{id} endpoint.
+
+    Attributes:
+        session_id: Session identifier
+        query: Original query
+        mode: Search or research mode
+        result: Session result (search or research)
+        created_at: Session creation timestamp
+        completed_at: Session completion timestamp
+    """
+
+    session_id: uuid.UUID = Field(..., description="Session identifier")
+    query: str = Field(..., description="Original query")
+    mode: Literal["search", "research"] = Field(..., description="Session mode")
+    result: SearchResponse | ResearchResponse | None = Field(None, description="Session result")
+    created_at: datetime = Field(..., description="Creation timestamp")
+    completed_at: datetime | None = Field(None, description="Completion timestamp")
+
+
+# ============================================================================
+# Error Response Schemas
+# ============================================================================
+
+
+class ErrorDetail(BaseModel):
+    """Detailed error information.
+
+    Attributes:
+        field: Field that caused error (if applicable)
+        message: Error message
+        type: Error type
+    """
+
+    field: str | None = Field(None, description="Field with error")
+    message: str = Field(..., description="Error message")
+    type: str = Field(..., description="Error type")
+
+
+class ErrorResponse(BaseModel):
+    """Standard error response format.
+
+    Attributes:
+        error: Error type/code
+        message: Human-readable error message
+        details: Detailed error information
+        trace_id: Request trace ID (for debugging)
+    """
+
+    error: str = Field(..., description="Error type/code")
+    message: str = Field(..., description="Error message")
+    details: list[ErrorDetail] | None = Field(None, description="Error details")
+    trace_id: str | None = Field(None, description="Request trace ID")
+
+
+# ============================================================================
+# Health Check Schemas
+# ============================================================================
+
+
+class HealthResponse(BaseModel):
+    """Response model for /health endpoint.
+
+    Attributes:
+        status: Service status
+        version: Service version
+        timestamp: Check timestamp
+    """
+
+    status: Literal["healthy", "degraded", "unhealthy"] = Field(..., description="Service status")
+    version: str = Field(..., description="Service version")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Check timestamp")
+
+
+# ============================================================================
+# Document Upload & Query Schemas
+# ============================================================================
+
+
+class DocumentUploadResponse(BaseModel):
+    """Response model for document upload.
+
+    Attributes:
+        document_id: UUID of uploaded document
+        filename: Original filename
+        source_type: Document type (pdf/word/excel/text)
+        collection: Collection name the document belongs to
+        chunks_created: Number of text chunks created
+        embedding_dimension: Dimension of embeddings
+        status: Upload status
+        message: Status message
+    """
+
+    document_id: uuid.UUID = Field(..., description="Document UUID")
+    filename: str = Field(..., description="Original filename")
+    source_type: str = Field(..., description="Document type")
+    collection: str = Field(..., description="Collection name")
+    chunks_created: int = Field(..., description="Number of chunks created")
+    embedding_dimension: int = Field(384, description="Embedding vector dimension")
+    status: Literal["success", "partial", "failed"] = Field(..., description="Upload status")
+    message: str = Field(..., description="Status message")
+
+
+class DocumentQueryRequest(BaseModel):
+    """Request model for querying uploaded documents.
+
+    Attributes:
+        query: Question to ask about documents
+        collection: Collection to search (default 'default')
+        top_k: Number of relevant chunks to retrieve (5-50, default 10)
+        similarity_threshold: Minimum similarity score (0.0-1.0, default 0.3)
+        model: LLM model for answer generation (optional)
+    """
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Question about uploaded documents (supports detailed, structured prompts)",
+        examples=["What are the key findings in the research paper?"],
+    )
+    collection: str = Field(
+        "default",
+        min_length=1,
+        max_length=100,
+        description="Collection name to search in",
+    )
+    top_k: int = Field(
+        10,
+        ge=5,
+        le=50,
+        description="Number of relevant document chunks to retrieve",
+    )
+    similarity_threshold: float = Field(
+        0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score for chunk retrieval",
+    )
+    model: str | None = Field(
+        None,
+        description="LLM model to use for answer generation (defaults to RESEARCH_LLM_MODEL)",
+    )
+
+
+class DocumentQueryResponse(BaseModel):
+    """Response model for document query.
+
+    Attributes:
+        query: Original query
+        answer: Generated answer
+        sources: Document chunks used for answer
+        total_chunks_found: Total chunks above similarity threshold
+        chunks_used: Number of chunks used for answer
+        execution_time: Query execution time in seconds
+    """
+
+    query: str = Field(..., description="Original query")
+    answer: str = Field(..., description="Generated answer from documents")
+    sources: list[dict[str, Any]] = Field(
+        ..., description="Source chunks with content, metadata, and scores"
+    )
+    total_chunks_found: int = Field(..., description="Total chunks above similarity threshold")
+    chunks_used: int = Field(..., description="Chunks used for answer generation")
+    execution_time: float = Field(..., description="Execution time in seconds")
+    trace_url: str | None = Field(None, description="Langfuse trace URL")
+
+
+class DocumentListItem(BaseModel):
+    """Model for a single document in list response.
+
+    Attributes:
+        document_id: Document UUID
+        filename: Original filename
+        source_type: Document type
+        collection: Collection name
+        chunks_count: Number of chunks
+        created_at: Upload timestamp
+        last_accessed: Last access timestamp
+        access_count: Number of times accessed
+    """
+
+    document_id: uuid.UUID = Field(..., description="Document UUID")
+    filename: str = Field(..., description="Original filename")
+    source_type: str = Field(..., description="Document type")
+    collection: str = Field(..., description="Collection name")
+    chunks_count: int = Field(..., description="Number of text chunks")
+    created_at: datetime = Field(..., description="Upload timestamp")
+    last_accessed: datetime | None = Field(None, description="Last access time")
+    access_count: int = Field(0, description="Access count")
+
+
+class DocumentListResponse(BaseModel):
+    """Response model for listing documents.
+
+    Attributes:
+        documents: List of documents
+        total_count: Total number of documents
+        collection: Collection filter (if applied)
+    """
+
+    documents: list[DocumentListItem] = Field(..., description="List of documents")
+    total_count: int = Field(..., description="Total document count")
+    collection: str | None = Field(None, description="Filtered collection")
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response model for document deletion.
+
+    Attributes:
+        document_id: Deleted document UUID
+        chunks_deleted: Number of chunks deleted
+        status: Deletion status
+        message: Status message
+    """
+
+    document_id: uuid.UUID = Field(..., description="Deleted document UUID")
+    chunks_deleted: int = Field(..., description="Number of chunks deleted")
+    status: Literal["success", "not_found", "error"] = Field(..., description="Deletion status")
+    message: str = Field(..., description="Status message")
