@@ -60,4 +60,7 @@ htmlcov/
 pytest_cache/
 
 # Env files
-.env*
+.env
+.env.local
+.env.*.local
+!.env.example

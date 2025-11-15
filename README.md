@@ -112,17 +112,36 @@ cd privachat_agents
 ```
 
 2. **Set up environment variables**
+
+Copy the example environment file and configure it:
+
 ```bash
 cp .env.example .env
-# Edit .env and add your OpenRouter API key
 ```
 
-Required environment variables:
+Then edit `.env` and configure the following **required** settings:
+
 ```env
-OPENROUTER_API_KEY=your_key_here
-OPENROUTER_MODEL=openrouter/auto
-POSTGRES_PASSWORD=your_secure_password
+# Required: Get your free API key at https://openrouter.ai/keys
+OPENROUTER_API_KEY=sk-or-your-actual-key-here
+
+# Required: Set a strong password for PostgreSQL
+POSTGRES_PASSWORD=your_secure_password_here
 ```
+
+**Optional but recommended:**
+```env
+# Enable Langfuse monitoring (optional)
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+
+# Adjust search behavior (optional)
+SEARXNG_PAGES=3
+SEARXNG_CATEGORIES=general,news,science,IT
+```
+
+**⚠️ Important:** Never commit your `.env` file with real credentials! The `.env` file is already in `.gitignore`.
 
 3. **Start the services**
 ```bash
