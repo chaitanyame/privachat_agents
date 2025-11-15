@@ -1,0 +1,42 @@
+# ============================================================
+# Simple Perplexica - Shared Services
+# ============================================================
+# This compose file provides shared services (SearxNG, Redis)
+# used by the research-service application.
+#
+# For the research-service API and UI, use:
+#   cd research-service && docker-compose up
+#
+# Legacy services (api, researchsvc, ui) have been removed.
+# They are preserved in branch: archive/legacy-services-2025-11-15
+# ============================================================
+
+services:
+  # ============================================================
+  # Search Engine (SearxNG)
+  # ============================================================
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+    restart: unless-stopped
+
+  # ============================================================
+  # Cache Layer (Redis)
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+    name: 'simple-perplexica-redis'

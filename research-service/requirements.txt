@@ -1,0 +1,44 @@
+# Core dependencies
+fastapi>=0.115.0,<0.116.0
+uvicorn[standard]>=0.32.0,<0.33.0
+python-multipart>=0.0.12,<0.1.0  # Required for file uploads
+pydantic>=2.10.0,<3.0.0  # Using 2.10+ for crawl4ai and pydantic-ai
+pydantic-settings>=2.6.0,<3.0.0
+pydantic-ai>=0.0.14,<0.1.0
+
+# AI & LLM
+openai==1.55.3  # For OpenRouter (OpenAI-compatible)
+langfuse==2.56.0
+sentence-transformers==3.3.1
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+psycopg[binary]==3.2.3
+pgvector==0.3.6
+alembic==1.14.0
+
+# Crawling & Document Processing
+crawl4ai==0.7.6  # Latest version compatible with Python 3.13
+docling==2.18.0  # Latest version compatible with Python 3.13
+pypdf2==3.0.1  # Fallback PDF extraction
+pdfplumber==0.11.4  # Alternative PDF extraction with better table support
+beautifulsoup4==4.12.3
+trafilatura==1.12.2
+# playwright will be installed by crawl4ai (requires >=1.49.0)
+
+# HTTP & Networking
+httpx==0.28.0
+tenacity==9.0.0
+
+# Caching
+redis[hiredis]==5.2.0
+
+# Utilities
+python-dotenv==1.0.1
+structlog==24.4.0
+python-dateutil==2.9.0.post0
+markdown==3.7
+
+# For Streamlit testing UI
+streamlit==1.40.1
