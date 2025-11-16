@@ -98,12 +98,14 @@ Built with Python, FastAPI, Pydantic AI, PostgreSQL, and OpenRouter - delivering
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Docker and Docker Compose
-- OpenRouter API key (free tier available)
-- Python 3.11+ (for local development)
+> **💡 Recommended:** Use Docker for the easiest setup experience. All services are pre-configured and will work out of the box.
 
-### Installation
+### Prerequisites
+- **Docker and Docker Compose** (required)
+- **OpenRouter API key** - Get your free API key at [openrouter.ai/keys](https://openrouter.ai/keys)
+- Python 3.11+ (only for local development without Docker)
+
+### Installation (Docker - Recommended)
 
 1. **Clone the repository**
 ```bash
@@ -533,19 +535,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Code of Conduct**: See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 - **Security**: See [SECURITY.md](SECURITY.md)
-
----
-
-## 🎯 Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for planned features and improvements.
-
-**Upcoming:**
-- [ ] Multi-modal document support (PDFs, images, videos)
-- [ ] Advanced citation tracking
-- [ ] Custom agent workflows
-- [ ] Real-time collaboration features
-- [ ] Enhanced monitoring and observability
 
 ---
 
