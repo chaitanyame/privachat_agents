@@ -1,3 +1,5 @@
+name: privachat_agents
+
 services:
   # PostgreSQL with pgvector extension
   postgres:
