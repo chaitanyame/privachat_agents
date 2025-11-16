@@ -2,7 +2,7 @@ services:
   # PostgreSQL with pgvector extension
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: privachat_postgres
+    container_name: postgres
     environment:
       POSTGRES_DB: research_db
       POSTGRES_USER: research_user
@@ -23,7 +23,7 @@ services:
   # Redis for caching
   redis:
     image: redis:7-alpine
-    container_name: privachat_redis
+    container_name: redis
     ports:
       - "6380:6379"  # Use 6380 externally to avoid conflict with main Redis
     volumes:
@@ -37,11 +37,11 @@ services:
       - privachat-network
 
   # PrivaChat Agents API
-  privachat-api:
+  api:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: privachat_api
+    container_name: api
     ports:
       - "8001:8000"  # Use 8001 externally to avoid conflict with other services
     environment:
@@ -101,21 +101,20 @@ services:
     command: uvicorn privachat_agents.main:app --host 0.0.0.0 --port 8000
     networks:
       - privachat-network
-      - simple_perplexica_default  # Connect to main app's network for SearXNG access
 
   # Streamlit testing UI
   streamlit:
     build:
       context: .
       dockerfile: Dockerfile.streamlit
-    container_name: privachat_streamlit
+    container_name: streamlit
     profiles: ["ui"]
     ports:
       - "8503:8501"
     environment:
-      API_BASE_URL: http://privachat-api:8000/api
+      API_BASE_URL: http://api:8000/api
     depends_on:
-      - privachat-api
+      - api
     volumes:
       - ./ui/streamlit_app.py:/app/streamlit_app.py
     command: streamlit run streamlit_app.py --server.address=0.0.0.0
@@ -130,7 +129,3 @@ volumes:
 networks:
   privachat-network:
     driver: bridge
-  # Connect to main app's network to access SearXNG directly
-  simple_perplexica_default:
-    external: true
-    name: simple_perplexica_default
