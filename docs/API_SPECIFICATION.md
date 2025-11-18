@@ -1,41 +1,74 @@
-# Simple Perplexica API Specification
+# PrivaChat Agents API Specification
 
-## Base URL
+**Version**: 0.2.0
+**Last Updated**: November 2025
+**Status**: Production Ready
+
+---
+
+## Table of Contents
+
+1. [Base URL & Access](#base-url--access)
+2. [Authentication](#authentication)
+3. [Search Endpoints](#search-endpoints)
+4. [Research Endpoints](#research-endpoints)
+5. [Document Management](#document-management)
+6. [Sessions](#sessions)
+7. [Error Handling](#error-handling)
+8. [API Documentation](#api-documentation)
+9. [Examples](#examples)
+
+---
+
+## Base URL & Access
+
 ```
-http://localhost:3001
+http://localhost:8001
 ```
 
-## Endpoints
+### Interactive Documentation
 
-### 1. Search (POST /api/search)
+- **Swagger UI**: http://localhost:8001/api/docs
+- **ReDoc**: http://localhost:8001/api/redoc
+- **OpenAPI JSON**: http://localhost:8001/api/openapi.json
 
-Performs web search with AI-powered answer synthesis and citation.
+---
 
-**Endpoint**: `POST /api/search`
+## Authentication
 
-**Content-Type**: `application/json`
+The API is currently **open** (no authentication required). For production deployments, implement:
+- API key authentication
+- OAuth 2.0
+- JWT tokens
+
+See [SECURITY.md](../SECURITY.md) for security guidelines.
+
+---
+
+## Search Endpoints
+
+### 1. POST /api/v1/search - Fast Search
+
+Execute a fast search with query decomposition and parallel source retrieval.
+
+**Summary**: Perform fast web search with AI-powered answer synthesis
+
+**Tags**: `search`
 
 #### Request Body
 
 ```json
 {
-  "query": "string (required)",
-  "focusMode": "webSearch | academicSearch | writingAssistant | wolframAlphaSearch | youtubeSearch | redditSearch (required)",
-  "optimizationMode": "speed | balanced | quality (default: balanced)",
-  "chatModel": {
-    "providerId": "string",
-    "key": "string"
-  },
-  "embeddingModel": {
-    "providerId": "string", 
-    "key": "string"
-  },
-  "history": [
-    ["user message", "assistant response"],
-    ["user message", "assistant response"]
-  ],
-  "systemInstructions": "string (optional)",
-  "stream": false
+  "query": "What is Pydantic AI?",
+  "mode": "balanced",
+  "max_sources": 20,
+  "timeout": 60,
+  "model": null,
+  "search_engine": "auto",
+  "prompt_strategy": "auto",
+  "enable_diversity": true,
+  "enable_recency": false,
+  "enable_query_aware": false
 }
 ```
 
@@ -43,56 +76,50 @@ Performs web search with AI-powered answer synthesis and citation.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `query` | string | ✅ Yes | - | The search query or question |
-| `focusMode` | enum | ✅ Yes | - | Search focus mode (see Focus Modes) |
-| `optimizationMode` | enum | No | `balanced` | Quality vs speed optimization |
-| `chatModel` | object | No | Default model | LLM model to use for synthesis |
-| `embeddingModel` | object | No | Default model | Embedding model for reranking |
-| `history` | array | No | `[]` | Conversation history for context |
-| `systemInstructions` | string | No | `null` | Custom instructions for the AI |
-| `stream` | boolean | No | `false` | Enable NDJSON streaming response |
+| `query` | string | ✅ | - | Search query (1-5000 characters) |
+| `mode` | enum | No | `balanced` | Search mode: `speed` (fast, 5-10 sources), `balanced` (default, 10-15 sources), `deep` (comprehensive, 15-20 sources) |
+| `max_sources` | integer | No | None | Maximum sources (5-50). Overrides mode default if provided |
+| `timeout` | integer | No | None | Timeout in seconds (10-300). Overrides mode default if provided |
+| `model` | string | No | None | LLM model to use (e.g., `google/gemini-2.0-flash-lite-001`). Uses default if not provided |
+| `search_engine` | enum | No | `auto` | Search backend: `searxng` (open-source), `serperdev` (Google API), `perplexity` (AI-powered), `auto` (tries SearXNG first, fallback to SerperDev) |
+| `prompt_strategy` | enum | No | `auto` | System prompt strategy: `static` (fixed prompts), `dynamic` (query-aware), `auto` (uses config) |
+| `enable_diversity` | boolean | No | `true` | Enable diversity penalty to reduce duplicate results |
+| `enable_recency` | boolean | No | `false` | Enable recency boost for temporal queries (experimental) |
+| `enable_query_aware` | boolean | No | `false` | Enable query-aware score adaptations (experimental) |
 
-#### Focus Modes
-
-- **`webSearch`**: General web search (default engines)
-- **`academicSearch`**: Academic sources (arXiv, Google Scholar, PubMed)
-- **`writingAssistant`**: No search, direct LLM response
-- **`wolframAlphaSearch`**: WolframAlpha computational engine
-- **`youtubeSearch`**: YouTube video search
-- **`redditSearch`**: Reddit discussion search
-
-#### Optimization Modes
-
-- **`speed`**: Fast response, minimal reranking
-  - Max docs: 15
-  - Context chars: 600
-  - Reranking: Disabled
-  - URL enrichment: Disabled
-
-- **`balanced`**: Balance of speed and quality (default)
-  - Max docs: 15
-  - Context chars: 800
-  - Reranking: Enabled
-  - URL enrichment: Disabled
-
-- **`quality`**: Maximum quality, comprehensive analysis
-  - Max docs: 20
-  - Context chars: 1200
-  - Reranking: Enabled
-  - URL enrichment: Top 3 URLs fetched and chunked
-
-#### Response (Non-Streaming)
+#### Response (200 OK)
 
 ```json
 {
-  "message": "string",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "query": "What is Pydantic AI?",
+  "answer": "Pydantic AI is an LLM framework that makes building AI agents simple and intuitive...",
+  "sub_queries": [
+    {
+      "query": "What is Pydantic AI used for?",
+      "intent": "definition",
+      "priority": 1
+    }
+  ],
   "sources": [
     {
-      "title": "string",
-      "url": "string",
-      "pageContent": "string"
+      "title": "Pydantic AI Documentation",
+      "url": "https://ai.pydantic.dev/",
+      "snippet": "Pydantic AI is an LLM framework...",
+      "relevance": 0.95,
+      "semantic_score": 0.92,
+      "final_score": 0.935,
+      "source_type": "web"
     }
-  ]
+  ],
+  "mode": "balanced",
+  "execution_time": 3.45,
+  "confidence": 0.92,
+  "model_used": "google/gemini-2.0-flash-lite-001",
+  "trace_url": "https://langfuse.com/trace/...",
+  "grounding_score": 0.98,
+  "hallucination_count": 0,
+  "created_at": "2025-11-16T10:30:00Z"
 }
 ```
 
@@ -100,380 +127,643 @@ Performs web search with AI-powered answer synthesis and citation.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `message` | string | AI-generated answer with inline [n] citations |
-| `sources` | array | List of sources used (numbered 1-N) |
-| `sources[].title` | string | Source title or URL with chunk info |
-| `sources[].url` | string | Source URL |
-| `sources[].pageContent` | string | Content snippet or full text (if enriched) |
+| `session_id` | UUID | Unique session identifier for tracking |
+| `query` | string | Original search query |
+| `answer` | string | AI-generated answer with inline citations |
+| `sub_queries` | array | Query decomposition results |
+| `sources` | array | Retrieved and ranked sources |
+| `mode` | string | Search mode used |
+| `execution_time` | number | Total execution time in seconds |
+| `confidence` | number | Confidence score (0-1, higher is better) |
+| `model_used` | string | LLM model used for answer generation |
+| `trace_url` | string | Langfuse trace URL for debugging (null if tracing disabled) |
+| `grounding_score` | number | Hallucination detection score (0-1, higher is better) |
+| `hallucination_count` | integer | Number of unsupported claims detected |
+| `created_at` | string | ISO 8601 timestamp |
 
-#### Response (Streaming)
+#### Possible Responses
 
-When `stream: true`, returns `text/event-stream` with NDJSON events:
+- **200 OK**: Search completed successfully
+- **422 Unprocessable Entity**: Invalid request parameters (e.g., empty query)
+- **504 Gateway Timeout**: Search exceeded timeout limit
+- **500 Internal Server Error**: Search execution failed
 
-```json
-{"type": "init", "data": "Stream connected"}
-{"type": "sources", "data": [...]}
-{"type": "response", "data": "AI answer text"}
-{"type": "done"}
-```
-
-#### Example Request (cURL)
+#### Example: cURL
 
 ```bash
-curl -X POST http://localhost:3001/api/search \
+curl -X POST http://localhost:8001/api/v1/search \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "What are the main features of Python?",
-    "focusMode": "webSearch",
-    "optimizationMode": "quality"
+    "query": "What is Pydantic AI?",
+    "mode": "balanced"
   }'
 ```
 
-#### Example Request (PowerShell)
-
-```powershell
-$body = @{
-    query = "What are the main features of Python?"
-    focusMode = "webSearch"
-    optimizationMode = "quality"
-    stream = $false
-} | ConvertTo-Json
-
-$response = Invoke-RestMethod -Uri "http://localhost:3001/api/search" `
-    -Method POST `
-    -Body $body `
-    -ContentType "application/json"
-
-Write-Host $response.message
-```
-
-#### Example Request (JavaScript/Fetch)
-
-```javascript
-const response = await fetch('http://localhost:3001/api/search', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    query: 'What are the main features of Python?',
-    focusMode: 'webSearch',
-    optimizationMode: 'quality',
-    stream: false
-  })
-});
-
-const data = await response.json();
-console.log(data.message);
-console.log('Sources:', data.sources.length);
-```
-
-#### Example Request (Python)
+#### Example: Python (requests)
 
 ```python
 import requests
 
-response = requests.post('http://localhost:3001/api/search', json={
-    'query': 'What are the main features of Python?',
-    'focusMode': 'webSearch',
-    'optimizationMode': 'quality',
-    'stream': False
-})
+response = requests.post(
+    "http://localhost:8001/api/v1/search",
+    json={
+        "query": "What is Pydantic AI?",
+        "mode": "balanced"
+    }
+)
 
 data = response.json()
-print(data['message'])
+print(data["answer"])
 print(f"Sources: {len(data['sources'])}")
+print(f"Confidence: {data['confidence']:.2%}")
 ```
 
-#### Example Response
+#### Example: JavaScript (fetch)
 
-```json
-{
-  "message": "Python stands out as a highly versatile and widely adopted programming language [1][2]. Its design philosophy emphasizes readability and ease of use [2][13].\n\n## Simplicity and Readability\n\nA cornerstone of Python's appeal is its straightforward syntax, which closely resembles human language [2][13]...",
-  "sources": [
-    {
-      "title": "16 Key Features of Python Programming Language",
-      "url": "https://www.scientecheasy.com/2022/08/features-of-python.html/",
-      "pageContent": "Python is a high-level, interpreted programming language..."
-    },
-    {
-      "title": "https://pythongeeks.org/features-of-python/ (chunk 1/3)",
-      "url": "https://pythongeeks.org/features-of-python/",
-      "pageContent": "About Python™ | Python.org\nNotice:\nWhile JavaScript is not essential..."
-    }
-  ]
-}
+```javascript
+const response = await fetch("http://localhost:8001/api/v1/search", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    query: "What is Pydantic AI?",
+    mode: "balanced"
+  })
+});
+
+const data = await response.json();
+console.log(data.answer);
+console.log(`Sources: ${data.sources.length}`);
+console.log(`Confidence: ${(data.confidence * 100).toFixed(1)}%`);
 ```
 
 ---
 
-### 2. Get Providers (GET /api/providers)
+### 2. POST /api/v1/search/perplexity - Direct Perplexity Search
 
-Returns available LLM and embedding model providers.
+Execute search using Perplexity AI API directly (bypasses SearchAgent).
 
-**Endpoint**: `GET /api/providers`
+**Summary**: Perform direct search using Perplexity AI (returns ready-to-use answer with citations)
 
-#### Response
+**Tags**: `search`
 
-```json
-{
-  "providers": [
-    {
-      "id": "string",
-      "name": "string",
-      "chatModels": [
-        {
-          "name": "string",
-          "key": "string"
-        }
-      ],
-      "embeddingModels": [
-        {
-          "name": "string",
-          "key": "string"
-        }
-      ]
-    }
-  ]
-}
-```
+#### Request Body
 
-#### Example Request
+Same as `/api/v1/search` (see above)
+
+#### Response (200 OK)
+
+Same structure as `/api/v1/search` but with:
+- `mode`: `"perplexity"`
+- `sources`: Generated from Perplexity citations
+- `sub_queries`: Empty (Perplexity handles decomposition internally)
+- `confidence`: Always `0.95` (Perplexity curated results)
+
+#### Example: cURL
 
 ```bash
-curl http://localhost:3001/api/providers
+curl -X POST http://localhost:8001/api/v1/search/perplexity \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Latest AI breakthroughs in 2025"}'
 ```
 
-#### Example Response
+---
+
+## Research Endpoints
+
+### 1. POST /api/v1/research - Deep Research
+
+Execute iterative research with planning and source synthesis.
+
+**Summary**: Perform deep research with multi-step research plan and comprehensive findings
+
+**Tags**: `research`
+
+#### Request Body
 
 ```json
 {
-  "providers": [
+  "query": "Impact of AI on software development in 2025",
+  "mode": "deep",
+  "max_iterations": 3,
+  "timeout": 300,
+  "model": null,
+  "prompt_strategy": "auto"
+}
+```
+
+#### Request Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | ✅ | - | Research query (1-5000 characters) |
+| `mode` | enum | No | `deep` | Search mode for underlying searches |
+| `max_iterations` | integer | No | `3` | Maximum research iterations (1-10) |
+| `timeout` | integer | No | `300` | Timeout in seconds |
+| `model` | string | No | None | LLM model override |
+| `prompt_strategy` | enum | No | `auto` | System prompt strategy |
+
+#### Response (200 OK)
+
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "query": "Impact of AI on software development in 2025",
+  "plan": {
+    "original_query": "Impact of AI on software development in 2025",
+    "steps": [
+      {
+        "step_number": 1,
+        "description": "Identify current AI tools in software development",
+        "search_query": "AI tools software development 2025",
+        "expected_outcome": "Overview of popular AI development tools",
+        "depends_on": []
+      }
+    ],
+    "estimated_time": 45,
+    "complexity": "moderate"
+  },
+  "findings": "After comprehensive research, AI is fundamentally transforming software development...",
+  "citations": [
     {
-      "id": "openrouter",
-      "name": "OpenRouter",
-      "chatModels": [
-        {
-          "name": "DeepSeek Chat v3.1",
-          "key": "deepseek/deepseek-chat-v3.1:free"
-        }
-      ],
-      "embeddingModels": [
-        {
-          "name": "OpenAI Text Embedding Small",
-          "key": "text-embedding-3-small"
-        }
-      ]
+      "source_id": "1",
+      "title": "The State of AI in Software Development 2025",
+      "url": "https://example.com/ai-software-dev",
+      "excerpt": "AI tools are now mainstream in software development...",
+      "relevance": 0.98
+    }
+  ],
+  "execution_time": 45.5,
+  "execution_steps": [],
+  "confidence": 0.94,
+  "model_used": "google/gemini-2.0-flash-lite-001",
+  "trace_url": "https://langfuse.com/trace/..."
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `session_id` | UUID | Unique session identifier |
+| `query` | string | Original research query |
+| `plan` | object | Research plan with steps |
+| `findings` | string | Comprehensive research findings |
+| `citations` | array | Sources used in research |
+| `execution_time` | number | Total execution time in seconds |
+| `confidence` | number | Research confidence score (0-1) |
+| `model_used` | string | LLM model used |
+| `trace_url` | string | Langfuse trace URL (optional) |
+
+#### Possible Responses
+
+- **200 OK**: Research completed successfully
+- **422 Unprocessable Entity**: Invalid request parameters
+- **504 Gateway Timeout**: Research exceeded timeout limit
+- **500 Internal Server Error**: Research execution failed
+
+#### Example: cURL
+
+```bash
+curl -X POST http://localhost:8001/api/v1/research \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Impact of AI on software development",
+    "max_iterations": 3
+  }'
+```
+
+---
+
+## Document Management
+
+### 1. POST /api/v1/documents - Upload Document
+
+Upload a document (PDF, Word, Excel, etc.) for RAG-based queries.
+
+**Tags**: `documents`
+
+#### Request
+
+- **Content-Type**: `multipart/form-data`
+- **Body**:
+  - `file` (file, required): Document file to upload
+  - `collection_id` (string, optional): Collection to store document in
+
+#### Response (200 OK)
+
+```json
+{
+  "document_id": "550e8400-e29b-41d4-a716-446655440002",
+  "filename": "technical-paper.pdf",
+  "file_size": 2048576,
+  "pages": 45,
+  "chunks": 150,
+  "status": "indexed",
+  "indexed_at": "2025-11-16T10:30:00Z"
+}
+```
+
+#### Example: cURL
+
+```bash
+curl -X POST http://localhost:8001/api/v1/documents \
+  -F "file=@document.pdf"
+```
+
+#### Example: Python
+
+```python
+import requests
+
+with open("document.pdf", "rb") as f:
+    files = {"file": f}
+    response = requests.post(
+        "http://localhost:8001/api/v1/documents",
+        files=files
+    )
+
+data = response.json()
+print(f"Document ID: {data['document_id']}")
+print(f"Chunks created: {data['chunks']}")
+```
+
+---
+
+### 2. GET /api/v1/documents - List Documents
+
+List all uploaded documents.
+
+**Tags**: `documents`
+
+#### Response (200 OK)
+
+```json
+{
+  "documents": [
+    {
+      "document_id": "550e8400-e29b-41d4-a716-446655440002",
+      "filename": "technical-paper.pdf",
+      "file_size": 2048576,
+      "pages": 45,
+      "chunks": 150,
+      "uploaded_at": "2025-11-16T10:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+#### Example: cURL
+
+```bash
+curl http://localhost:8001/api/v1/documents
+```
+
+---
+
+### 3. POST /api/v1/documents/query - Query Documents
+
+Query uploaded documents using RAG (Retrieval-Augmented Generation).
+
+**Tags**: `documents`
+
+#### Request Body
+
+```json
+{
+  "query": "What are the main conclusions?",
+  "document_ids": ["550e8400-e29b-41d4-a716-446655440002"],
+  "max_sources": 5
+}
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "query": "What are the main conclusions?",
+  "answer": "The research concludes that...",
+  "sources": [
+    {
+      "document_id": "550e8400-e29b-41d4-a716-446655440002",
+      "filename": "technical-paper.pdf",
+      "page": 42,
+      "excerpt": "In conclusion, our findings show..."
     }
   ]
 }
 ```
 
----
+#### Example: cURL
 
-### 3. Health Check (GET /)
-
-Simple health check endpoint.
-
-**Endpoint**: `GET /`
-
-#### Response
-
-```json
-{
-  "status": "ok"
-}
+```bash
+curl -X POST http://localhost:8001/api/v1/documents/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What are the main conclusions?",
+    "document_ids": ["550e8400-e29b-41d4-a716-446655440002"]
+  }'
 ```
 
 ---
 
-## Features
+### 4. DELETE /api/v1/documents/{document_id} - Delete Document
 
-### URL/PDF Content Fetching (Quality Mode Only)
+Delete a document and its indexed chunks.
 
-When `optimizationMode: "quality"` is used:
-- Automatically fetches full content from top 3 search result URLs
-- Parses HTML with BeautifulSoup (removes scripts, styles, navigation)
-- Parses PDF with pypdf (extracts all pages)
-- Chunks content (2000 chars per chunk, 200 char overlap)
-- Replaces shallow snippets with rich content (10-15x more context)
+**Tags**: `documents`
 
-**Example**: Instead of 150-char snippet, sources contain 2000+ char chunks:
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `document_id` | UUID | Document ID to delete |
+
+#### Response (200 OK)
+
 ```json
 {
-  "title": "https://example.com/article (chunk 1/3)",
-  "url": "https://example.com/article",
-  "pageContent": "Full article content with 2000+ characters..."
+  "success": true,
+  "message": "Document deleted successfully"
 }
 ```
 
-### Temporal Detection (SpaCy NLP)
+#### Example: cURL
 
-Automatically detects recency requirements using SpaCy Named Entity Recognition:
-- **Daily**: "today", "breaking news", "latest", "current" → `time_range=d`
-- **Weekly**: "this week", "recent", "past week" → `time_range=w`
-- **Monthly**: "this month", "past month" → `time_range=m`
-
-Applied to SearxNG search for fresh results.
-
-### Cosine Similarity Reranking
-
-Sources are reranked by semantic relevance using:
-- OpenRouter embeddings API
-- Cosine similarity between query and source content
-- Focus-mode-specific thresholds:
-  - `webSearch`: 0.3
-  - `academicSearch`: 0.0
-  - `redditSearch`: 0.3
-  - etc.
-
-Disabled in `speed` mode for faster response.
-
-### Citation System
-
-All responses use inline [n] citations matching source index:
-- Sources numbered 1-N in response
-- Citations appear as `[1]`, `[2]`, `[1][2]` inline
-- Every sentence typically has 1-3 citations
-- 48-50 citations per comprehensive response
-
-**Example**:
-```
-Python is a high-level language [1][2]. It emphasizes readability [3].
+```bash
+curl -X DELETE http://localhost:8001/api/v1/documents/550e8400-e29b-41d4-a716-446655440002
 ```
 
-### Blog-Style Responses
+---
 
-Enhanced Perplexica-style prompts generate:
-- **Structure**: Clear headings (##), sections, conclusion
-- **Tone**: Professional, journalistic, engaging
-- **Length**: 4900-5400 characters (comprehensive)
-- **Citations**: Every sentence cited
-- **Format**: Markdown with bold, italics, lists
+## Sessions
+
+### GET /api/v1/sessions/{session_id} - Get Session
+
+Retrieve a previous search or research session by ID.
+
+**Tags**: `sessions`
+
+#### Path Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | UUID | Session ID to retrieve |
+
+#### Response (200 OK)
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "query": "What is Pydantic AI?",
+  "mode": "search",
+  "status": "completed",
+  "result": {
+    "answer": "...",
+    "sources": [...]
+  },
+  "created_at": "2025-11-16T10:30:00Z",
+  "completed_at": "2025-11-16T10:33:00Z"
+}
+```
+
+#### Example: cURL
+
+```bash
+curl http://localhost:8001/api/v1/sessions/550e8400-e29b-41d4-a716-446655440000
+```
+
+#### Possible Responses
+
+- **200 OK**: Session found
+- **404 Not Found**: Session does not exist
+
+---
+
+## System Endpoints
+
+### GET /api/v1/health - Health Check
+
+Check if the API is running and healthy.
+
+**Tags**: `health`
+
+#### Response (200 OK)
+
+```json
+{
+  "status": "healthy",
+  "service": "research-service",
+  "version": "0.2.0",
+  "environment": "development"
+}
+```
+
+#### Example: cURL
+
+```bash
+curl http://localhost:8001/api/v1/health
+```
+
+---
+
+### GET / - Root Endpoint
+
+Get API information and available endpoints.
+
+#### Response (200 OK)
+
+```json
+{
+  "service": "Research Service API",
+  "version": "0.2.0",
+  "docs": "/api/docs",
+  "health": "/api/v1/health",
+  "status": "ready"
+}
+```
 
 ---
 
 ## Error Handling
 
-### Validation Errors (422)
+### Common Error Responses
+
+#### 422 Unprocessable Entity - Validation Error
 
 ```json
 {
   "detail": [
     {
+      "type": "string_too_short",
       "loc": ["body", "query"],
-      "msg": "field required",
-      "type": "value_error.missing"
+      "msg": "String should have at least 1 character",
+      "input": "",
+      "ctx": {"min_length": 1}
     }
   ]
 }
 ```
 
-### Common Error Scenarios
+**Causes**:
+- Missing required fields
+- Invalid field types
+- Out-of-range values
+- Invalid enum values
 
-- Missing required fields (`query`, `focusMode`)
-- Invalid enum values for `focusMode` or `optimizationMode`
-- Invalid `chatModel` or `embeddingModel` structure
-- Malformed `history` array
+#### 504 Gateway Timeout
 
----
-
-## Environment Configuration
-
-The API uses environment variables (configured in docker-compose.yaml):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | - | OpenRouter API key (required) |
-| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter endpoint |
-| `OPENROUTER_MODEL` | `deepseek/deepseek-chat-v3.1:free` | Default LLM model |
-| `OPENROUTER_EMBEDDING_MODEL` | `text-embedding-3-small` | Default embedding model |
-| `LLM_STRUCTURED_OUTPUT` | `false` | Enable structured output validation |
-
----
-
-## Rate Limits
-
-Depends on OpenRouter API limits for your API key:
-- Free tier: Variable rate limits
-- Paid tier: Higher limits based on plan
-
----
-
-## Best Practices
-
-### For Quality Responses
 ```json
 {
-  "query": "Your detailed question here",
-  "focusMode": "webSearch",
-  "optimizationMode": "quality",
-  "stream": false
+  "error": "search_timeout",
+  "message": "Search exceeded timeout of 60s",
+  "trace_id": "trace-123456"
 }
 ```
 
-### For Fast Responses
+**Causes**:
+- Search/research took longer than timeout
+- Network issues with search backends
+- Slow LLM response
+
+#### 500 Internal Server Error
+
 ```json
 {
-  "query": "Your question",
-  "focusMode": "webSearch", 
-  "optimizationMode": "speed",
-  "stream": false
+  "error": "search_execution_failed",
+  "message": "Search execution failed: ...",
+  "trace_id": "trace-123456",
+  "details": "Full error traceback (DEBUG mode only)"
 }
 ```
 
-### For Conversational Context
-```json
-{
-  "query": "Follow-up question",
-  "focusMode": "webSearch",
-  "history": [
-    ["What is Python?", "Python is a programming language..."],
-    ["What are its features?", "Python has many features..."]
-  ]
-}
-```
+**Causes**:
+- API key issues
+- Database connectivity
+- Search backend failures
+- LLM service unavailable
 
-### For Academic Research
+#### 404 Not Found
+
 ```json
 {
-  "query": "Latest research on quantum computing",
-  "focusMode": "academicSearch",
-  "optimizationMode": "quality"
+  "error": "session_not_found",
+  "message": "Session 550e8400-e29b-41d4-a716-446655440000 not found"
 }
 ```
 
 ---
 
-## OpenAPI Specification
+## API Documentation
 
-The full OpenAPI 3.1.0 specification is available at:
-```
-GET http://localhost:3001/openapi.json
+### Interactive Documentation
+
+Access interactive API documentation at these endpoints:
+
+- **Swagger UI** (OpenAPI 3.0): http://localhost:8001/api/docs
+  - Interactive request/response testing
+  - Schema validation
+  - Model examples
+
+- **ReDoc** (ReadTheDocs style): http://localhost:8001/api/redoc
+  - Clean, readable documentation
+  - Best for reading
+
+- **OpenAPI JSON**: http://localhost:8001/api/openapi.json
+  - Raw OpenAPI 3.1.0 specification
+  - For code generation tools
+
+### API Clients & SDKs
+
+Generate API clients from OpenAPI spec:
+
+**OpenAPI Generator**:
+```bash
+openapi-generator-cli generate -i http://localhost:8001/api/openapi.json \
+  -g python \
+  -o ./client
 ```
 
-Interactive Swagger UI documentation:
-```
-http://localhost:3001/docs
-```
-
-ReDoc documentation:
-```
-http://localhost:3001/redoc
+**FastAPI Clients**:
+```bash
+pip install httpx
 ```
 
 ---
 
-## Version
+## Examples
 
-**API Version**: 0.1.0
+### Example 1: Quick Search
 
-**Last Updated**: November 1, 2025
+```python
+import httpx
+
+async with httpx.AsyncClient() as client:
+    response = await client.post(
+        "http://localhost:8001/api/v1/search",
+        json={"query": "Latest Python features"}
+    )
+    result = response.json()
+    print(result["answer"])
+```
+
+### Example 2: Deep Research
+
+```python
+import httpx
+
+async with httpx.AsyncClient() as client:
+    response = await client.post(
+        "http://localhost:8001/api/v1/research",
+        json={
+            "query": "State of AI in 2025",
+            "max_iterations": 5
+        }
+    )
+    result = response.json()
+    print(f"Findings: {result['findings']}")
+    print(f"Citations: {len(result['citations'])}")
+```
+
+### Example 3: Document Upload & Query
+
+```python
+import httpx
+
+async with httpx.AsyncClient() as client:
+    # Upload
+    with open("paper.pdf", "rb") as f:
+        files = {"file": f}
+        upload_resp = await client.post(
+            "http://localhost:8001/api/v1/documents",
+            files=files
+        )
+    doc_id = upload_resp.json()["document_id"]
+
+    # Query
+    query_resp = await client.post(
+        "http://localhost:8001/api/v1/documents/query",
+        json={
+            "query": "What is the conclusion?",
+            "document_ids": [doc_id]
+        }
+    )
+    print(query_resp.json()["answer"])
+```
 
 ---
 
-## Support
+## Rate Limiting
 
-For issues or questions:
-- Repository: https://github.com/YOUR_USERNAME/privachat_agents
-- Branch: `001-api-mvp-web-search`
+No rate limiting is currently enforced. For production, implement:
+- Per-IP rate limits (100 requests/minute)
+- Per-API-key rate limits
+- Per-endpoint rate limits
+
+---
+
+## Support & Issues
+
+- **Documentation**: [API Guide](./API_CONSUMPTION.md)
+- **Issues**: https://github.com/chaitanyame/privachat_agents/issues
+- **Discussions**: https://github.com/chaitanyame/privachat_agents/discussions

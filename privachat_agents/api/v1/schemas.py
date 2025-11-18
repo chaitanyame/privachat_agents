@@ -124,6 +124,29 @@ class SubQueryResponse(BaseModel):
     priority: int = Field(..., ge=1, le=10, description="Execution priority")
 
 
+class CitationInfo(BaseModel):
+    """Citation-to-source mapping for answer citations.
+
+    Maps inline citation markers like [1], [2] in the answer to their
+    corresponding sources in the sources array.
+
+    Attributes:
+        citation_number: Citation marker number (1-based, e.g., [1], [2])
+        source_index: Index in sources array (0-based)
+        mention_count: Number of times this citation appears in answer
+        source_title: Title of the cited source
+        source_url: Full URL of the cited source
+        domain: Simplified domain name (e.g., "wikipedia", "arxiv", "openai")
+    """
+
+    citation_number: int = Field(..., ge=1, description="Citation marker number (e.g., 1 for [1])")
+    source_index: int = Field(..., ge=0, description="Index in sources array (0-based)")
+    mention_count: int = Field(..., ge=1, description="Number of times cited in answer")
+    source_title: str = Field(..., description="Title of the cited source")
+    source_url: str = Field(..., description="Full URL of the cited source")
+    domain: str = Field(..., description="Simplified domain name (e.g., 'wikipedia', 'arxiv')")
+
+
 class SearchResponse(BaseModel):
     """Response model for /v1/search endpoint.
 
@@ -148,6 +171,9 @@ class SearchResponse(BaseModel):
     answer: str = Field(..., description="AI-generated answer based on sources")
     sub_queries: list[SubQueryResponse] = Field(..., description="Decomposed sub-queries")
     sources: list[SearchSourceResponse] = Field(..., description="Retrieved sources")
+    citation_mapping: list[CitationInfo] | None = Field(
+        None, description="Citation-to-source mappings (maps [1], [2] to sources array)"
+    )
     mode: str = Field("balanced", description="Search mode used (speed/balanced/deep)")
     execution_time: float = Field(..., ge=0.0, description="Execution time (seconds)")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Result confidence")

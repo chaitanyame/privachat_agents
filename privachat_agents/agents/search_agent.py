@@ -142,6 +142,7 @@ class SearchOutput(BaseModel):
         answer: AI-generated answer synthesizing the sources
         sub_queries: List of decomposed sub-queries
         sources: Ranked and filtered search sources
+        citation_mapping: Citation-to-source mappings (optional)
         execution_time: Total execution time in seconds
         confidence: Overall confidence score (0.0-1.0)
         grounding_score: Hallucination detection score (0-1, higher = better)
@@ -151,6 +152,9 @@ class SearchOutput(BaseModel):
     answer: str = Field(..., min_length=1, description="AI-generated answer")
     sub_queries: list[SubQuery]
     sources: list[SearchSource]
+    citation_mapping: list[dict[str, Any]] | None = Field(
+        None, description="Citation-to-source mappings"
+    )
     execution_time: float
     confidence: float = Field(ge=0.0, le=1.0)
     grounding_score: float | None = Field(
@@ -2727,6 +2731,150 @@ Generate the corrected answer:"""
         return answer
 
     # =========================================================================
+    # Citation Mapping (Extract [1], [2] markers and map to sources)
+    # =========================================================================
+
+    def _extract_simplified_domain(self, url: str) -> str:
+        """Extract simplified domain name from URL.
+
+        Extracts the primary domain name without TLD for cleaner UI display.
+        Examples:
+            - "https://wikipedia.org/article" -> "wikipedia"
+            - "https://www.arxiv.org/paper" -> "arxiv"
+            - "https://en.wikipedia.org/wiki/AI" -> "wikipedia"
+            - "https://docs.python.org/3/" -> "python"
+            - "https://github.com/user/repo" -> "github"
+
+        Args:
+            url: Source URL to extract domain from
+
+        Returns:
+            Simplified domain name (e.g., "wikipedia", "arxiv", "github")
+            Returns "unknown" for invalid URLs
+        """
+        from urllib.parse import urlparse
+
+        try:
+            if not url or not url.strip():
+                return "unknown"
+
+            parsed = urlparse(url)
+            netloc = parsed.netloc
+
+            if not netloc:
+                return "unknown"
+
+            # Remove www. prefix
+            if netloc.startswith("www."):
+                netloc = netloc[4:]
+
+            # Split by dots and extract primary domain
+            parts = netloc.split(".")
+
+            if len(parts) < 2:
+                return "unknown"
+
+            # Handle special subdomains that should map to primary domain
+            # e.g., "en.wikipedia.org" -> "wikipedia", "docs.python.org" -> "python"
+            if len(parts) >= 3:
+                # Check if second-to-last part looks like primary domain
+                # (not a common subdomain like "www", "en", "docs", "blog", "api")
+                subdomain = parts[0]
+                primary_domain = parts[-2]
+
+                # Common subdomains to ignore (prefer primary domain)
+                common_subdomains = {"www", "en", "es", "fr", "de", "docs", "blog", "api", "m", "mobile"}
+
+                if subdomain in common_subdomains:
+                    return primary_domain
+
+                # For unknown subdomains, prefer primary domain for major sites
+                # e.g., "careers.google.com" -> "google", not "careers"
+                return primary_domain
+
+            # For standard domains (e.g., "github.com"), return first part
+            return parts[0]
+
+        except Exception as e:
+            logger.warning(f"Failed to extract domain from URL '{url}': {e}")
+            return "unknown"
+
+    def _extract_citation_mapping(
+        self, answer: str, sources: list[SearchSource]
+    ) -> list[dict[str, Any]]:
+        """Extract citation markers from answer and map to sources.
+
+        Parses inline citation markers like [1], [2] from the answer text
+        and maps them to their corresponding sources in the sources array.
+
+        Args:
+            answer: AI-generated answer with citation markers like [1], [2]
+            sources: List of sources (0-indexed array)
+
+        Returns:
+            List of citation mappings with structure:
+            [
+                {
+                    "citation_number": 1,
+                    "source_index": 0,
+                    "mention_count": 3,
+                    "source_title": "Title",
+                    "source_url": "https://...",
+                    "domain": "wikipedia"
+                },
+                ...
+            ]
+            Citations are sorted by citation_number.
+            Out-of-bounds citations (e.g., [99] with only 5 sources) are excluded.
+        """
+        import re
+
+        if not answer or not sources:
+            return []
+
+        # Extract all citation markers like [1], [2], [3]
+        pattern = r"\[(\d+)\]"
+        matches = re.findall(pattern, answer)
+
+        if not matches:
+            return []
+
+        # Count mentions for each citation number
+        citation_counts: dict[int, int] = {}
+        for match in matches:
+            citation_num = int(match)
+            citation_counts[citation_num] = citation_counts.get(citation_num, 0) + 1
+
+        # Build citation mapping
+        citation_mapping: list[dict[str, Any]] = []
+
+        for citation_num in sorted(citation_counts.keys()):
+            # Convert 1-based citation to 0-based source index
+            source_index = citation_num - 1
+
+            # Validate citation is within bounds (citations start at 1, not 0)
+            if citation_num <= 0 or source_index >= len(sources):
+                logger.warning(
+                    f"Out-of-bounds citation [{citation_num}] (only {len(sources)} sources available)"
+                )
+                continue
+
+            source = sources[source_index]
+
+            citation_mapping.append(
+                {
+                    "citation_number": citation_num,
+                    "source_index": source_index,
+                    "mention_count": citation_counts[citation_num],
+                    "source_title": source.title,
+                    "source_url": source.url,
+                    "domain": self._extract_simplified_domain(source.url),
+                }
+            )
+
+        return citation_mapping
+
+    # =========================================================================
     # Cascading Fallback Strategy (SearxNG → SerperDev → Perplexity)
     # =========================================================================
 
@@ -3124,18 +3272,23 @@ Generate the corrected answer:"""
 
             execution_time = time.time() - start_time
 
-            # 6. Build output
+            # 6. Extract citation mapping from answer
+            citation_mapping = self._extract_citation_mapping(answer, ranked_sources)
+            logger.info(f"📎 Extracted {len(citation_mapping)} citation mappings")
+
+            # 7. Build output
             output = SearchOutput(
                 answer=answer,
                 sub_queries=sub_queries,
                 sources=ranked_sources,
+                citation_mapping=citation_mapping if citation_mapping else None,
                 execution_time=execution_time,
                 confidence=0.8,  # Default confidence
                 grounding_score=grounding_score,
                 hallucination_count=hallucination_count,
             )
 
-            # 7. Validate output
+            # 8. Validate output
             output = await self.validate_output(output)
 
             logger.info(

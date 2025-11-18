@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from privachat_agents.agents.search_agent import SearchAgent, SearchAgentDeps
 from privachat_agents.api.v1.schemas import (
+    CitationInfo,
     SearchRequest,
     SearchResponse,
     SearchSourceResponse,
@@ -229,6 +230,11 @@ def convert_search_output_to_response(
             )
             for src in output.sources
         ],
+        citation_mapping=(
+            [CitationInfo(**cm) for cm in output.citation_mapping]
+            if output.citation_mapping
+            else None
+        ),
         mode=mode,
         execution_time=output.execution_time,
         confidence=output.confidence,
