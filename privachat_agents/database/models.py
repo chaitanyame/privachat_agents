@@ -107,3 +107,26 @@ class DocumentEmbedding(Base):
     embedding: Mapped[Any] = mapped_column(Vector(384), nullable=False)
     doc_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ExcludedDomain(Base):
+    r"""Domains excluded from web crawling to avoid unnecessary data fetching.
+    
+    Supports multiple pattern types:
+    - exact: Exact domain match (e.g., 'youtube.com')
+    - wildcard: Shell-style wildcard patterns (e.g., '*.youtube.*')
+    - regex: Regular expression patterns (e.g., r'^.*\.youtube\..*$')
+    """
+
+    __tablename__ = "excluded_domains"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    domain_pattern: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    pattern_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="exact"
+    )  # 'exact', 'wildcard', 'regex'
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_by: Mapped[str | None] = mapped_column(String(100), nullable=True)

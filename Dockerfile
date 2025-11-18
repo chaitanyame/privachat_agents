@@ -24,11 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m -u 1000 research
 
 # Install Python dependencies first for better layer caching
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
 # Use BuildKit cache mount when available to accelerate pip installs
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install -r requirements-dev.txt
 
 # Playwright installation (browsers and OS deps)
 # Install browsers as non-root (cache in user dir), and deps as root
@@ -48,7 +49,10 @@ USER root
 
 # Copy application code with correct ownership (avoid chown step)
 COPY --chown=research:research privachat_agents/ ./privachat_agents/
+COPY --chown=research:research tests/ ./tests/
 COPY --chown=research:research pyproject.toml .
+COPY --chown=research:research alembic/ ./alembic/
+COPY --chown=research:research alembic.ini .
 
 # Switch to research user for runtime
 USER research

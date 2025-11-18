@@ -113,6 +113,18 @@ class Settings(BaseSettings):
         default=300, description="Maximum time for research pipeline (seconds)"
     )
 
+    # Domain Exclusion Settings
+    ENABLE_DOMAIN_EXCLUSION: bool = Field(
+        default=True,
+        description="Enable domain exclusion to skip crawling specific domains (e.g., YouTube, social media)",
+    )
+    DOMAIN_EXCLUSION_CACHE_TTL: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+        description="Cache TTL for excluded domains in seconds (300 = 5 minutes)",
+    )
+
     # Search Mode Settings
     SEARCH_MAX_QUERIES: int = Field(default=4, description="Maximum sub-queries in search mode")
     SEARCH_MAX_SOURCES: int = Field(

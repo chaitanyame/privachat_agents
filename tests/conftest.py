@@ -37,7 +37,7 @@ def event_loop():
 @pytest.fixture(scope="session", autouse=True)
 def mock_openrouter_client():
     """Global fixture to mock all OpenRouter API calls."""
-    with patch("src.services.llm.openrouter_client.OpenRouterClient") as mock_client_class:
+    with patch("privachat_agents.services.llm.openrouter_client.OpenRouterClient") as mock_client_class:
         # Create a mock instance
         mock_instance = MagicMock()
 

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from privachat_agents.core.search_modes import SearchMode, get_mode_from_string
 from privachat_agents.core.config import settings
+from privachat_agents.database.repositories import ExcludedDomainRepository
 from privachat_agents.services.crawl.crawl4ai_client import Crawl4AIClient
 from privachat_agents.services.document.dockling_processor import DocklingProcessor
 from privachat_agents.services.embedding.embedding_service import EmbeddingService
@@ -1019,6 +1020,9 @@ Respond with valid JSON only."""
 
     async def enrich_sources_with_content(self, sources: list[SearchSource]) -> list[SearchSource]:
         """Enrich search sources by crawling URLs for full content.
+        
+        This method filters out excluded domains before crawling to avoid
+        fetching unnecessary data (e.g., YouTube videos).
 
         Args:
             sources: Search sources with snippets
@@ -1034,13 +1038,36 @@ Respond with valid JSON only."""
             logger.info("⏭️  URL crawling disabled, skipping content enrichment")
             return sources
 
-        # Select top URLs to crawl (by relevance)
-        urls_to_crawl = sources[: self.deps.max_crawl_urls]
-        logger.info(f"🌐 Crawling {len(urls_to_crawl)} URLs for full content extraction")
+        # Filter out excluded domains (e.g., YouTube, social media)
+        excluded_repo = ExcludedDomainRepository(self.deps.db)
+        filtered_sources = []
+        excluded_count = 0
+        
+        for source in sources[: self.deps.max_crawl_urls]:
+            try:
+                is_excluded = await excluded_repo.is_domain_excluded(source.url)
+                if is_excluded:
+                    excluded_count += 1
+                    logger.info(f"⏭️  Skipping excluded domain: {source.url}")
+                else:
+                    filtered_sources.append(source)
+            except ValueError as e:
+                # Invalid URL, log and skip
+                logger.warning(f"⚠️  Invalid URL, skipping: {source.url} - {e}")
+                excluded_count += 1
+        
+        if excluded_count > 0:
+            logger.info(f"🚫 Excluded {excluded_count} domains from crawling")
+        
+        if not filtered_sources:
+            logger.info("⏭️  No URLs to crawl after domain filtering")
+            return sources
+        
+        logger.info(f"🌐 Crawling {len(filtered_sources)} URLs for full content extraction")
 
         # Crawl URLs in parallel
         crawl_tasks = []
-        for source in urls_to_crawl:
+        for source in filtered_sources:
             crawl_tasks.append(self._crawl_single_url(source))
 
         results = await asyncio.gather(*crawl_tasks, return_exceptions=True)
@@ -1048,10 +1075,10 @@ Respond with valid JSON only."""
         # Count successful crawls
         success_count = sum(
             1
-            for r, source in zip(results, urls_to_crawl)
+            for r, source in zip(results, filtered_sources)
             if not isinstance(r, Exception) and source.content
         )
-        logger.info(f"✅ Successfully crawled {success_count}/{len(urls_to_crawl)} URLs")
+        logger.info(f"✅ Successfully crawled {success_count}/{len(filtered_sources)} URLs")
 
         return sources
 
