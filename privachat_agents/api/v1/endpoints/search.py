@@ -10,7 +10,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from privachat_agents.services.document.dockling_processor import DocklingProces
 from privachat_agents.services.embedding.embedding_service import EmbeddingService
 from privachat_agents.services.llm.langfuse_tracer import LangfuseTracer
 from privachat_agents.services.llm.openrouter_client import OpenRouterClient
+from privachat_agents.services.redis_client import RedisClient
 from privachat_agents.services.search.searxng_client import SearxNGClient
 
 if TYPE_CHECKING:
@@ -185,6 +186,104 @@ async def store_search_session(
     await db.commit()
 
 
+async def execute_search_background(
+    session_id: uuid.UUID,
+    request: SearchRequest,
+    redis_client: RedisClient,
+) -> None:
+    """Execute search in background and store result in Redis.
+
+    Args:
+        session_id: Session identifier
+        request: Search request parameters
+        redis_client: Redis client for job state storage
+    """
+    # Import here to avoid circular dependencies
+    from privachat_agents.database.session import AsyncSessionLocal
+
+    try:
+        # Update status to 'processing'
+        await redis_client.set_job_status(
+            session_id=str(session_id),
+            status="processing",
+        )
+
+        # Create new DB session for background task
+        async with AsyncSessionLocal() as db:
+            # Get mode configuration
+            from privachat_agents.core.search_modes import get_mode_from_string
+
+            search_mode = get_mode_from_string(request.mode)
+            config = search_mode.config
+
+            # Use request parameters or mode defaults
+            max_sources = request.max_sources if request.max_sources is not None else config.max_sources
+            timeout = request.timeout if request.timeout is not None else config.timeout
+
+            # Create SearchAgent
+            agent = await create_search_agent(
+                db=db,
+                model=request.model,
+                max_sources=max_sources,
+                timeout=float(timeout),
+                enable_diversity=request.enable_diversity,
+                enable_recency=request.enable_recency,
+                enable_query_aware=request.enable_query_aware,
+                search_engine=request.search_engine or "auto",
+            )
+
+            # Execute search
+            output = await asyncio.wait_for(
+                agent.run(request.query, mode=search_mode),
+                timeout=float(timeout),
+            )
+
+            # Convert to response
+            response = convert_search_output_to_response(
+                session_id=session_id,
+                query=request.query,
+                output=output,
+                model_used=request.model or settings.LLM_MODEL,
+                mode=request.mode or "balanced",
+                trace_url=None,
+            )
+
+            # Store in Redis with 'completed' status
+            await redis_client.set_job_status(
+                session_id=str(session_id),
+                status="completed",
+                result=response.model_dump(mode="json"),
+            )
+
+            # Store session in database
+            await store_search_session(
+                db=db,
+                session_id=session_id,
+                query=request.query,
+                result=response.model_dump(mode="json"),
+            )
+
+            # Flush traces
+            if agent.deps.tracer:
+                agent.deps.tracer.flush()
+
+    except TimeoutError:
+        await redis_client.set_job_status(
+            session_id=str(session_id),
+            status="failed",
+            error=f"Search exceeded timeout of {timeout}s",
+        )
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        await redis_client.set_job_status(
+            session_id=str(session_id),
+            status="failed",
+            error=f"Search execution failed: {str(e)}\n{error_details}",
+        )
+
+
 def convert_search_output_to_response(
     session_id: uuid.UUID,
     query: str,
@@ -261,22 +360,56 @@ def convert_search_output_to_response(
 )
 async def search(
     request: SearchRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> SearchResponse:
     """Execute search query using SearchAgent.
 
+    Supports two modes:
+    1. Sync mode (default): Returns complete result immediately
+    2. Async mode (async_mode=true): Returns session_id immediately, processes in background
+
     Args:
         request: Search request with query and parameters
+        background_tasks: FastAPI background tasks
         db: Database session
 
     Returns:
-        SearchResponse with results
+        SearchResponse with results (sync) or status='pending' (async)
 
     Raises:
         HTTPException: On timeout or execution error
     """
     session_id = uuid.uuid4()
 
+    # ASYNC MODE: Return session_id immediately, process in background
+    if request.async_mode:
+        redis_client = RedisClient()
+
+        # Set initial status to 'pending'
+        await redis_client.set_job_status(
+            session_id=str(session_id),
+            status="pending",
+        )
+
+        # Queue background task
+        background_tasks.add_task(
+            execute_search_background,
+            session_id=session_id,
+            request=request,
+            redis_client=redis_client,
+        )
+
+        # Return immediate response with pending status
+        return SearchResponse(
+            session_id=session_id,
+            status="pending",
+            query=request.query,
+            mode=request.mode or "balanced",
+            created_at=datetime.utcnow(),
+        )
+
+    # SYNC MODE: Execute search and return complete result
     try:
         # Get mode configuration
         from privachat_agents.core.search_modes import get_mode_from_string
@@ -393,6 +526,83 @@ async def search(
                 ),
             },
         )
+
+
+@router.get(
+    "/search/status/{session_id}",
+    response_model=SearchResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get async search job status",
+    description="Poll for async search job status and results (24-hour TTL)",
+    responses={
+        200: {"description": "Job status retrieved successfully"},
+        404: {"description": "Job not found (expired or invalid session_id)"},
+        500: {"description": "Internal server error"},
+    },
+)
+async def get_search_status(
+    session_id: uuid.UUID,
+) -> SearchResponse:
+    """Get async search job status from Redis.
+
+    Args:
+        session_id: Session identifier from async search request
+
+    Returns:
+        SearchResponse with status field:
+        - 'pending': Job queued but not started
+        - 'processing': Job currently executing
+        - 'completed': Job finished, includes full result
+        - 'failed': Job failed, includes error message
+
+    Raises:
+        HTTPException: If job not found or Redis error
+    """
+    redis_client = RedisClient()
+
+    try:
+        job_data = await redis_client.get_job_status(str(session_id))
+
+        if job_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job not found: session_id={session_id} (expired or invalid)",
+            )
+
+        job_status = job_data.get("status")
+        result = job_data.get("result")
+        error = job_data.get("error")
+
+        # For 'completed' status, return full result
+        if job_status == "completed" and result:
+            return SearchResponse(**result)
+
+        # For 'pending'/'processing'/'failed' status, return minimal response
+        return SearchResponse(
+            session_id=session_id,
+            status=job_status,
+            query=result.get("query") if result else "Processing...",
+            error=error,
+            mode=result.get("mode", "balanced") if result else "balanced",
+            created_at=datetime.utcnow(),
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"❌ Status Poll Error: {str(e)}")
+        print(f"Traceback:\n{error_details}")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve job status: {str(e)}",
+        )
+
+    finally:
+        await redis_client.close()
 
 
 @router.post(

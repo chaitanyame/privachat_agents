@@ -76,6 +76,10 @@ class SearchRequest(BaseModel):
         False,
         description="Enable query-aware score adaptations (experimental)",
     )
+    async_mode: bool = Field(
+        False,
+        description="Enable async processing: returns session_id immediately, process in background (poll via /v1/search/status/{session_id})",
+    )
 
     @field_validator("query")
     @classmethod
@@ -152,6 +156,7 @@ class SearchResponse(BaseModel):
 
     Attributes:
         session_id: Unique session identifier
+        status: Job status ('pending'/'processing'/'completed'/'failed', for async mode only)
         query: Original search query
         answer: AI-generated answer based on sources
         sub_queries: Decomposed sub-queries
@@ -167,17 +172,20 @@ class SearchResponse(BaseModel):
     """
 
     session_id: uuid.UUID = Field(..., description="Session identifier")
+    status: Literal["pending", "processing", "completed", "failed"] | None = Field(
+        None, description="Job status (for async mode: 'pending'/'processing'/'completed'/'failed')"
+    )
     query: str = Field(..., description="Original search query")
-    answer: str = Field(..., description="AI-generated answer based on sources")
-    sub_queries: list[SubQueryResponse] = Field(..., description="Decomposed sub-queries")
-    sources: list[SearchSourceResponse] = Field(..., description="Retrieved sources")
+    answer: str | None = Field(None, description="AI-generated answer based on sources")
+    sub_queries: list[SubQueryResponse] | None = Field(None, description="Decomposed sub-queries")
+    sources: list[SearchSourceResponse] | None = Field(None, description="Retrieved sources")
     citation_mapping: list[CitationInfo] | None = Field(
         None, description="Citation-to-source mappings (maps [1], [2] to sources array)"
     )
     mode: str = Field("balanced", description="Search mode used (speed/balanced/deep)")
-    execution_time: float = Field(..., ge=0.0, description="Execution time (seconds)")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Result confidence")
-    model_used: str = Field(..., description="LLM model used")
+    execution_time: float | None = Field(None, ge=0.0, description="Execution time (seconds)")
+    confidence: float | None = Field(None, ge=0.0, le=1.0, description="Result confidence")
+    model_used: str | None = Field(None, description="LLM model used")
     trace_url: str | None = Field(None, description="Langfuse trace URL")
     grounding_score: float | None = Field(
         None, ge=0.0, le=1.0, description="Hallucination detection score (0-1)"
@@ -185,6 +193,7 @@ class SearchResponse(BaseModel):
     hallucination_count: int | None = Field(
         None, ge=0, description="Number of unsupported claims detected"
     )
+    error: str | None = Field(None, description="Error message (for failed async jobs)")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
 
 
