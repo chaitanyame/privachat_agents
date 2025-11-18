@@ -2539,7 +2539,7 @@ Write a detailed answer with full explanations for everything:"""
 {correction_context}
 
 **VERIFIED SOURCES** (use ONLY these):
-{chr(10).join([f"[{i + 1}] {s.title} - {s.content[:300]}..." for i, s in enumerate(sources[:7])])}
+{chr(10).join([f"[{i + 1}] {s.title} - {(s.content or s.snippet or '')[:300]}..." for i, s in enumerate(sources[:7])])}
 
 **INSTRUCTIONS**:
 1. Remove or rewrite each unsupported claim
@@ -2553,12 +2553,17 @@ Generate the corrected answer:"""
 
                             try:
                                 # Use Gemini 2.0 Flash for hallucination correction (more reliable than DeepSeek R1)
-                                regeneration_response = await self._run_llm_chat(
+                                original_model = self.deps.llm_client.model
+                                self.deps.llm_client.model = "google/gemini-2.0-flash-exp:free"
+                                
+                                regeneration_response = await self.deps.llm_client.chat(
                                     messages=[{"role": "user", "content": regeneration_prompt}],
                                     temperature=0.3,  # Lower for accuracy
                                     max_tokens=2048,
-                                    model_override="google/gemini-2.0-flash-exp:free",  # Gemini for regeneration
                                 )
+                                
+                                # Restore original model
+                                self.deps.llm_client.model = original_model
 
                                 if (
                                     isinstance(regeneration_response, dict)
@@ -2672,9 +2677,17 @@ Generate the corrected answer:"""
                     # ========== PHASE 3 TASK 5: CONFIDENCE SCORING ==========
                     # Calculate response confidence with per-type metrics
                     total_claims = len(grounding_result.claims)
+                    
+                    # Get content type (fallback to "general" if composition not available)
+                    content_type = "general"
+                    try:
+                        content_type = composition["primary_type"]
+                    except (NameError, KeyError, TypeError):
+                        logger.debug("Composition not available, using default content type")
+                    
                     confidence_scores = self._calculate_response_confidence(
                         grounding_score=grounding_score,
-                        content_type=composition["primary_type"],
+                        content_type=content_type,
                         hallucination_count=hallucination_count,
                         total_claims=total_claims,
                     )
