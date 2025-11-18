@@ -38,6 +38,21 @@ services:
     networks:
       - privachat-network
 
+  # SearxNG - Privacy-respecting metasearch engine
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SECRET=61b911452ef904be8e4758c7004b6fa5ee86d6b4f5bc6e0b219963a44fb403b9
+    networks:
+      - privachat-network
+    restart: unless-stopped
+
   # PrivaChat Agents API
   api:
     build:
@@ -97,6 +112,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      searxng:
+        condition: service_started
     volumes:
       - ./privachat_agents:/app/privachat_agents
       - ./tests:/app/tests
