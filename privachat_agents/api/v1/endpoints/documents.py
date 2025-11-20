@@ -384,7 +384,7 @@ async def _generate_answer(
     # Generate answer with LLM - Use Gemini 2.0 Flash Lite (less rate limiting)
     llm_client = OpenRouterClient(
         api_key=settings.OPENROUTER_API_KEY,
-        model="google/gemini-2.0-flash-lite-001",  # Lite version with good context window
+        model="google/gemini-2.5-flash-lite",  # Lite version with good context window
         tracer=tracer,
     )
 

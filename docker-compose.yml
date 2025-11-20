@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: research_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5433:5432"  # Use 5433 externally to avoid conflicts
+      - "127.0.0.1:5433:5432"  # Localhost only
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./privachat_agents/database/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -20,14 +20,19 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - privachat-network
+      - backend-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
 
   # Redis for caching
   redis:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "6380:6379"  # Use 6380 externally to avoid conflict with main Redis
+      - "127.0.0.1:6380:6379"  # Localhost only
     volumes:
       - redis_data:/data
     healthcheck:
@@ -36,22 +41,38 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - privachat-network
+      - backend-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   # SearxNG - Privacy-respecting metasearch engine
   searxng:
     image: searxng/searxng:latest
     container_name: searxng
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080" # Localhost only
     volumes:
       - ./config/searxng:/etc/searxng:rw
     environment:
       - SEARXNG_BASE_URL=http://localhost:8080/
-      - SEARXNG_SECRET=61b911452ef904be8e4758c7004b6fa5ee86d6b4f5bc6e0b219963a44fb403b9
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
     networks:
-      - privachat-network
+      - frontend-network
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
 
   # PrivaChat Agents API
   api:
@@ -60,13 +81,17 @@ services:
       dockerfile: Dockerfile
     container_name: api
     ports:
-      - "8001:8000"  # Use 8001 externally to avoid conflict with other services
+      - "127.0.0.1:8001:8000"  # Localhost only
     environment:
       # Database
       DATABASE_URL: postgresql+asyncpg://research_user:${POSTGRES_PASSWORD}@postgres:5432/research_db
       
       # Redis
       REDIS_URL: redis://redis:6379/0
+      
+      # Override default paths to use writable data directory
+      CRAWL4AI_BASE_DIRECTORY: /opt/app/data/.crawl4ai
+      HOME: /opt/app/data
       
       # LLM & Monitoring
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
@@ -107,6 +132,7 @@ services:
       # App settings
       LOG_LEVEL: ${LOG_LEVEL}
       API_RATE_LIMIT: ${API_RATE_LIMIT}
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,11 +141,21 @@ services:
       searxng:
         condition: service_started
     volumes:
-      - ./privachat_agents:/app/privachat_agents
-      - ./tests:/app/tests
+      - ./privachat_agents:/opt/app/privachat_agents
+      - ./tests:/opt/app/tests
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+      - /opt/app/data:uid=1000,gid=1000,mode=1755
     command: uvicorn privachat_agents.main:app --host 0.0.0.0 --port 8000
     networks:
-      - privachat-network
+      - backend-network
+      - frontend-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
 
   # Streamlit testing UI
   streamlit:
@@ -132,19 +168,37 @@ services:
       - "8503:8501"
     environment:
       API_BASE_URL: http://api:8000/api
+      STREAMLIT_SERVER_ENABLE_STATIC_SERVING: "false"
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: "none"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
     depends_on:
       - api
     volumes:
-      - ./ui/streamlit_app.py:/app/streamlit_app.py
+      - ./ui/streamlit_app.py:/opt/app/streamlit_app.py
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+      - /opt/app/data:uid=1000,gid=1000,mode=1755
     command: streamlit run streamlit_app.py --server.address=0.0.0.0
     networks:
-      - privachat-network
+      - frontend-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
 
 volumes:
   postgres_data:
   redis_data:
 
 networks:
-  privachat-network:
+  backend-network:
+    internal: true
+    driver: bridge
+  frontend-network:
     driver: bridge

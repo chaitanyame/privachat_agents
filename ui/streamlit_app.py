@@ -173,7 +173,7 @@ def main():
             "Model",
             [
                 "google/gemini-2.5-flash-lite",
-                "google/gemini-2.0-flash-lite-001",
+                "google/gemini-2.5-flash-lite",
             ],
             index=0,
         )

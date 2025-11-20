@@ -116,7 +116,7 @@ class TestLLMFactory:
 
         config2 = LLMConfig(
             provider="openrouter",
-            model="google/gemini-2.0-flash-lite-001",
+            model="google/gemini-2.5-flash-lite",
             temperature=0.2,
             max_tokens=4096,
             timeout=120,

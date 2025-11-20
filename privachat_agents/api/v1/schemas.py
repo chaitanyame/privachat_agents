@@ -53,7 +53,7 @@ class SearchRequest(BaseModel):
     )
     model: str | None = Field(
         None,
-        description="LLM model to use (e.g., 'google/gemini-2.0-flash-lite-001')",
+        description="LLM model to use (e.g., 'google/gemini-2.5-flash-lite')",
     )
     search_engine: Literal["searxng", "serperdev", "perplexity", "auto"] | None = Field(
         "auto",
@@ -238,7 +238,7 @@ class ResearchRequest(BaseModel):
     )
     model: str | None = Field(
         None,
-        description="LLM model to use (e.g., 'google/gemini-2.0-flash-lite-001')",
+        description="LLM model to use (e.g., 'google/gemini-2.5-flash-lite')",
     )
     prompt_strategy: Literal["static", "dynamic", "auto"] | None = Field(
         "auto",
