@@ -2579,9 +2579,9 @@ Write a detailed answer with full explanations for everything:"""
 Generate the corrected answer:"""
 
                             try:
-                                # Use Gemini 2.0 Flash for hallucination correction (more reliable than DeepSeek R1)
+                                # Use configured regeneration model for hallucination correction
                                 original_model = self.deps.llm_client.model
-                                self.deps.llm_client.model = "google/gemini-2.0-flash-exp:free"
+                                self.deps.llm_client.model = settings.REGENERATION_LLM_MODEL
                                 
                                 regeneration_response = await self.deps.llm_client.chat(
                                     messages=[{"role": "user", "content": regeneration_prompt}],

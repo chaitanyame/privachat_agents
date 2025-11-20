@@ -231,6 +231,12 @@ class Settings(BaseSettings):
         description="Optional dedicated model for final synthesis/answer generation (e.g., google/gemini-2.5-flash-lite). If None, uses RESEARCH_LLM_MODEL",
     )
 
+    # Regeneration LLM (for hallucination correction)
+    REGENERATION_LLM_MODEL: str = Field(
+        default="google/gemini-2.5-flash-lite",
+        description="Model for hallucination correction/regeneration (default: google/gemini-2.5-flash-lite)",
+    )
+
     # Feature Flags
     ENABLE_DYNAMIC_PROMPTS: bool = Field(
         default=True,
