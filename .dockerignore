@@ -1,17 +1,67 @@
-**/node_modules
+# Version control
 .git
 .gitignore
+.github
+
+# IDE
 .vscode
 .idea
+.claude
+
+# Python
 **/__pycache__
 **/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
 **/.venv
 **/venv
+**/*.egg-info
+*.egg-info
+
+# Build artifacts
 **/dist
 **/build
 **/.next
+
+# Testing
 **/coverage
+**/htmlcov
+**/.coverage
+**/test-results
+
+# Logs and temp
 **/*.log*
-.env*
+**/tmp
+**/temp
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
 Dockerfile*
 .dockerignore
+docker-compose*.yml
+
+# Documentation
+docs
+README.md
+*.md
+LICENSE
+SECURITY.md
+CHANGELOG.md
+MIGRATION.md
+
+# Examples and scripts
+examples
+scripts
+test_*.py
+test_*.json
+
+# Node (if any)
+**/node_modules
+
+# Config that's not needed in container
+config/searxng

@@ -12,8 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TRANSFORMERS_CACHE=/home/research/.cache/huggingface \
     HUGGINGFACE_HUB_CACHE=/home/research/.cache/huggingface
 
-# Install system dependencies (minimal set)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install system dependencies (minimal set) - use cache mount for apt
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libpq-dev \
@@ -32,20 +34,18 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-dev.txt
 
 # Playwright installation (browsers and OS deps)
-# Install browsers as non-root (cache in user dir), and deps as root
+# Create cache directory and set permissions before switching users
+RUN mkdir -p /opt/app/.cache/ms-playwright && chown -R research:research /opt/app
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/app/.cache/ms-playwright
 USER research
+# Only install chromium (skip webkit/firefox) to save ~1GB and 2+ minutes
 RUN playwright install chromium
 USER root
 RUN playwright install-deps chromium
 
-# Pre-download Hugging Face models to avoid runtime downloads
-# Done as 'research' user so caches live under /home/research/.cache/huggingface
-USER research
-RUN --mount=type=cache,target=/home/research/.cache/huggingface \
-    sh -lc "python -c \"from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')\"" || true
-RUN --mount=type=cache,target=/home/research/.cache/huggingface \
-    sh -lc "python -c \"from transformers import AutoTokenizer, AutoModelForSequenceClassification; name='cross-encoder/ms-marco-MiniLM-L-6-v2'; AutoTokenizer.from_pretrained(name); AutoModelForSequenceClassification.from_pretrained(name)\"" || true
-USER root
+# NOTE: Hugging Face models are downloaded at RUNTIME on first use
+# This saves ~5 minutes of build time and ~400MB of image size
+# Models are cached in /home/research/.cache/huggingface (persisted via volume)
 
 # Copy application code with correct ownership (avoid chown step)
 COPY --chown=research:research privachat_agents/ ./privachat_agents/
