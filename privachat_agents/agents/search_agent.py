@@ -339,18 +339,24 @@ class SearchAgent:
         lang_name = get_language_name(detected_lang)
         logger.info(f"🌍 Detected language: {lang_name} ({detected_lang})")
 
+        # Detect multi-entity queries first
+        detected_entities = self._detect_multi_item_query(query)
+        is_multi_entity = len(detected_entities) >= 2
+        
         # Use OpenRouter LLM directly with JSON mode for structured decomposition
-        system_prompt = """You are a query decomposition expert. Break down user queries into focused sub-queries with intelligent term expansion.
-
-Guidelines:
-- Simple queries (1 topic): Return 1-2 sub-queries
-- Complex queries (multiple topics): Return 2-4 sub-queries  
-- Each sub-query should be specific and searchable
-- Intent types: "factual" (facts/data), "definition" (what is X), "opinion" (views/analysis)
-- Priority: 1 (most important) to 5 (least important)
-
-QUERY EXPANSION (20-30% Better Coverage):
-- Detect ambiguous terms and expand with context:
+        if is_multi_entity:
+            entity_list = ", ".join(detected_entities)
+            logger.info(f"🎯 Multi-entity query detected: {len(detected_entities)} entities ({entity_list})")
+            logger.info(f"📋 Expansion strategy: 1 focused query per entity (no expansion)")
+            
+            # Multi-entity prompt (no expansion)
+            expansion_rules = "- SKIP expansion for multi-entity queries - generate 1 focused query per entity"
+            entity_note = f"contains MULTIPLE entities: {entity_list}"
+        else:
+            logger.info(f"📋 Expansion strategy: 1-2 expanded queries (with synonyms/variations)")
+            
+            # Single-entity prompt (with expansion)
+            expansion_rules = """- Detect ambiguous terms and expand with context:
   * "AI" → include "artificial intelligence", "machine learning" in separate sub-queries
   * "Python" → clarify "Python programming language" vs "python snake" based on context
   * "Apple" → specify "Apple Inc." vs "apple fruit" based on context
@@ -369,11 +375,28 @@ QUERY EXPANSION (20-30% Better Coverage):
   * Original: "Is AI dangerous?"
   * Expanded: ["AI safety risks", "artificial intelligence dangers", "machine learning threats"]
 
-EXPANSION RULES:
 - Keep 1 sub-query with original terms (for exact matches)
 - Add 1-2 sub-queries with expanded/synonym terms (for broader coverage)
 - Maintain query intent while expanding
-- Don't over-expand simple, unambiguous queries
+- Don't over-expand simple, unambiguous queries"""
+            entity_note = "contains a SINGLE entity/topic"
+        
+        system_prompt = f"""You are a query decomposition expert. Break down user queries into focused sub-queries with intelligent term expansion.
+
+MULTI-ENTITY DETECTION:
+- This query {entity_note}
+- Multi-entity strategy: Generate 1 focused sub-query per entity (no expansion needed)
+- Single-entity strategy: Generate 1-2 sub-queries with term expansion
+
+Guidelines:
+- Simple queries (1 topic): Return 1-2 sub-queries
+- Multi-entity queries (2+ entities): Return 1 sub-query per entity (NO expansion)
+- Each sub-query should be specific and searchable
+- Intent types: "factual" (facts/data), "definition" (what is X), "opinion" (views/analysis)
+- Priority: 1 (most important) to 5 (least important)
+
+QUERY EXPANSION RULES (ONLY for single-entity queries):
+{expansion_rules}
 
 Temporal Detection (CRITICAL - Extract ANY year mentioned):
 - If query mentions SPECIFIC YEAR (2022, 2023, 2024, etc.):
@@ -404,57 +427,83 @@ Temporal Detection (CRITICAL - Extract ANY year mentioned):
 
 Examples:
 
-Query: "What are AI agents?"
-Response (with expansion):
-{
-  "sub_queries": [
-    {"query": "What are AI agents?", "intent": "definition", "priority": 1, "temporal_scope": "any", "specific_year": null},
-    {"query": "artificial intelligence agents definition", "intent": "definition", "priority": 2, "temporal_scope": "any", "specific_year": null}
-  ]
-}
-
-Query: "Recent news about Microsoft Azure"
+Query: "What are AI agents?" (Single entity - WITH expansion)
 Response:
-{
+{{
   "sub_queries": [
-    {"query": "Microsoft Azure recent news 2025", "intent": "factual", "priority": 1, "temporal_scope": "recent", "specific_year": null}
+    {{"query": "What are AI agents?", "intent": "definition", "priority": 1, "temporal_scope": "any", "specific_year": null}},
+    {{"query": "artificial intelligence agents definition", "intent": "definition", "priority": 2, "temporal_scope": "any", "specific_year": null}}
   ]
-}
+}}
 
-Query: "Is AI dangerous?"
-Response (with expansion - demonstrates ambiguity detection):
-{
+Query: "latest cloud news of azure, aws, gcp" (Multi-entity - NO expansion)
+Response:
+{{
   "sub_queries": [
-    {"query": "Is AI dangerous?", "intent": "opinion", "priority": 1, "temporal_scope": "any", "specific_year": null},
-    {"query": "artificial intelligence safety risks", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": null},
-    {"query": "machine learning threats and concerns", "intent": "opinion", "priority": 2, "temporal_scope": "any", "specific_year": null}
+    {{"query": "Microsoft Azure latest cloud news November 2025", "intent": "factual", "priority": 1, "temporal_scope": "recent", "specific_year": null}},
+    {{"query": "Amazon AWS latest cloud news November 2025", "intent": "factual", "priority": 1, "temporal_scope": "recent", "specific_year": null}},
+    {{"query": "Google Cloud Platform latest news November 2025", "intent": "factual", "priority": 1, "temporal_scope": "recent", "specific_year": null}}
   ]
-}
+}}
+
+CRITICAL: For multi-entity queries with abbreviations or short names:
+- Expand abbreviations to full, recognizable names in the sub-query
+- GCP → "Google Cloud Platform" or "Google Cloud"
+- AWS → "Amazon AWS" or "Amazon Web Services"  
+- Azure → "Microsoft Azure"
+- This ensures search engines return relevant results for each entity
+
+Query: "Recent news about Microsoft Azure" (Single entity - NO expansion needed)
+Response:
+{{
+  "sub_queries": [
+    {{"query": "Microsoft Azure recent news 2025", "intent": "factual", "priority": 1, "temporal_scope": "recent", "specific_year": null}}
+  ]
+}}
+
+Query: "Python vs Java performance" (Multi-entity - NO expansion)
+Response:
+{{
+  "sub_queries": [
+    {{"query": "Python performance benchmarks", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": null}},
+    {{"query": "Java performance benchmarks", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": null}}
+  ]
+}}
+
+Query: "Is AI dangerous?" (Single entity - WITH expansion)
+Response:
+{{
+  "sub_queries": [
+    {{"query": "Is AI dangerous?", "intent": "opinion", "priority": 1, "temporal_scope": "any", "specific_year": null}},
+    {{"query": "artificial intelligence safety risks", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": null}},
+    {{"query": "machine learning threats and concerns", "intent": "opinion", "priority": 2, "temporal_scope": "any", "specific_year": null}}
+  ]
+}}
 
 Query: "GitHub Universe 2023 announcements"
 Response:
-{
+{{
   "sub_queries": [
-    {"query": "GitHub Universe 2023 announcements", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2023}
+    {{"query": "GitHub Universe 2023 announcements", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2023}}
   ]
-}
+}}
 
 Query: "AI developments in 2022"
 Response:
-{
+{{
   "sub_queries": [
-    {"query": "AI developments 2022", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2022}
+    {{"query": "AI developments 2022", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2022}}
   ]
-}
+}}
 
 Query: "Python trends 2020 vs 2024"
 Response:
-{
+{{
   "sub_queries": [
-    {"query": "Python trends 2020", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2020},
-    {"query": "Python trends 2024", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2024}
+    {{"query": "Python trends 2020", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2020}},
+    {{"query": "Python trends 2024", "intent": "factual", "priority": 1, "temporal_scope": "any", "specific_year": 2024}}
   ]
-}
+}}
 
 CRITICAL RULES:
 1. ALWAYS extract specific years (2022, 2023, 2024, etc.) and set specific_year field
@@ -1317,8 +1366,232 @@ Respond with valid JSON only."""
         # Sort by final_score (descending)
         filtered.sort(key=lambda s: s.final_score, reverse=True)
 
+        # Apply balanced source selection for multi-item queries (AWS, Azure, GCP)
+        balanced_sources = self._apply_balanced_source_selection(
+            query=original_query,
+            sources=filtered,
+            max_sources=self.max_sources
+        )
+
         # Return top max_sources
-        return filtered[: self.max_sources]
+        return balanced_sources[: self.max_sources]
+
+    # =========================================================================
+    # Balanced Source Selection for Multi-Item Queries
+    # =========================================================================
+
+    def _apply_balanced_source_selection(
+        self,
+        query: str,
+        sources: list[SearchSource],
+        max_sources: int
+    ) -> list[SearchSource]:
+        """Apply balanced source selection for multi-item queries.
+        
+        When a query asks about multiple items (e.g., "AWS, Azure, and GCP"),
+        this ensures proportional representation of each item in the top sources.
+        
+        Args:
+            query: Original search query
+            sources: Ranked sources (already sorted by final_score)
+            max_sources: Maximum number of sources to return
+            
+        Returns:
+            Rebalanced list of sources with proportional item coverage
+            
+        Example:
+            >>> query = "latest news from AWS, Azure, and GCP"
+            >>> # Returns ~33% AWS, ~33% Azure, ~33% GCP sources
+        """
+        # Detect if this is a multi-item query
+        items = self._detect_multi_item_query(query)
+        
+        if len(items) < 2:
+            # Not a multi-item query, return as-is
+            return sources
+        
+        logger.info(
+            "📊 Multi-item query detected, applying balanced selection",
+            items=items,
+            item_count=len(items),
+            target_per_item=max_sources // len(items)
+        )
+        
+        # Categorize sources by which item they match
+        item_buckets = {item: [] for item in items}
+        uncategorized = []
+        
+        for source in sources:
+            # Check title, URL, and snippet for item mentions
+            text = f"{source.title} {source.url} {source.snippet}".lower()
+            matched_items = []
+            
+            # Generic fuzzy matching for any items
+            # Match if the item appears as a whole word or partial match
+            for item in items:
+                item_lower = item.lower()
+                
+                # Check for exact match or word boundary match
+                if item_lower in text:
+                    matched_items.append(item)
+                # Also check for partial matches (e.g., "aws" matches "amazon-aws")
+                elif any(item_lower in word for word in text.split()):
+                    matched_items.append(item)
+            
+            if len(matched_items) == 1:
+                # Source clearly belongs to one item
+                item_buckets[matched_items[0]].append(source)
+            elif len(matched_items) > 1:
+                # Source mentions multiple items (e.g., comparison article)
+                # Add to first matched item's bucket
+                item_buckets[matched_items[0]].append(source)
+            else:
+                # Doesn't clearly match any item
+                uncategorized.append(source)
+        
+        # Log distribution
+        for item in items:
+            logger.info(
+                f"  📦 {item}: {len(item_buckets[item])} sources"
+            )
+        logger.info(f"  ❓ Uncategorized: {len(uncategorized)} sources")
+        
+        # Build balanced result set
+        # Strategy: Round-robin selection from each item's bucket
+        balanced_result = []
+        target_per_item = max(1, max_sources // len(items))
+        
+        # First pass: Take target_per_item from each bucket
+        for item in items:
+            balanced_result.extend(item_buckets[item][:target_per_item])
+        
+        # If we don't have enough sources yet, add more from buckets with extras
+        if len(balanced_result) < max_sources:
+            # Collect remaining sources from all buckets
+            remaining = []
+            for item in items:
+                remaining.extend(item_buckets[item][target_per_item:])
+            remaining.extend(uncategorized)
+            
+            # Sort remaining by score and take what we need
+            remaining.sort(key=lambda s: s.final_score, reverse=True)
+            needed = max_sources - len(balanced_result)
+            balanced_result.extend(remaining[:needed])
+        
+        # Log final distribution
+        final_dist = {item: 0 for item in items}
+        for source in balanced_result:
+            text = f"{source.title} {source.url}".lower()
+            for item in items:
+                if item.lower() in text:
+                    final_dist[item] += 1
+                    break
+        
+        logger.info(
+            "✅ Balanced selection complete",
+            final_distribution=final_dist,
+            total_sources=len(balanced_result)
+        )
+        
+        return balanced_result
+    
+    def _detect_multi_item_query(self, query: str) -> list[str]:
+        """Detect if query asks about multiple items using generic pattern matching.
+        
+        This method uses linguistic patterns to detect when a query asks about
+        multiple distinct items (e.g., "AWS vs Azure", "Python and Java", "Tesla, Ford, and GM").
+        
+        Args:
+            query: Search query
+            
+        Returns:
+            List of detected items extracted from conjunctions/comparisons
+            
+        Examples:
+            >>> _detect_multi_item_query("AWS vs Azure")
+            ['aws', 'azure']
+            >>> _detect_multi_item_query("Python, Java, and C++")
+            ['python', 'java', 'c++']
+        """
+        import re
+        
+        items = []
+        query_lower = query.lower()
+        
+        # Pattern 1: "A vs B vs C" - Split on vs/versus keywords
+        if 'vs' in query_lower or 'versus' in query_lower:
+            # Remove common words first
+            temp = query_lower
+            for word in ['compare', 'comparison', 'latest', 'news', 'from', 'about', 'of', 'the', 'and', 'or']:
+                temp = temp.replace(word + ' ', ' ')
+            # Split on vs/versus
+            vs_splits = re.split(r'\s+(?:vs\.?|versus)\s+', temp)
+            for item in vs_splits:
+                item = item.strip()
+                if len(item) > 2:
+                    items.append(item)
+        
+        # Pattern 2: "A and B" or "A or B"
+        if not items:  # Only try this if we haven't found items yet
+            and_or_pattern = r'\b(\w+(?:\s+\w+){0,2})\s+(?:and|or)\s+(\w+(?:\s+\w+){0,2})\b'
+            matches = re.findall(and_or_pattern, query_lower)
+            for match in matches:
+                items.extend([m.strip() for m in match if m.strip() and len(m.strip()) > 2])
+        
+        # Pattern 3: "A, B, and C" or "A, B, C" - Comma-separated lists
+        if not items:  # Only try this if we haven't found items yet
+            # Split on commas and extract items
+            if ',' in query_lower:
+                parts = query_lower.split(',')
+                for part in parts:
+                    # Clean up "and" or "or" at the start
+                    part = re.sub(r'^\s*(?:and|or)\s+', '', part.strip())
+                    # Extract the main term (skip filler words at the start and end)
+                    words = part.split()
+                    # Remove filler words from the beginning
+                    while words and words[0] in ['the', 'from', 'latest', 'news', 'about', 'of', 'with', 'in', 'on', 'cloud', 'technology', 'technologies', 'tech']:
+                        words.pop(0)
+                    # Remove filler words from the end
+                    while words and words[-1] in ['the', 'from', 'latest', 'news', 'about', 'of', 'with', 'in', 'on']:
+                        words.pop()
+                    # Take up to 3 words as the entity (handles "Google Cloud Platform")
+                    if words:
+                        entity = ' '.join(words[:3])
+                        if len(entity) > 2:
+                            items.append(entity)
+        
+        # Deduplicate and filter out common words
+        stop_words = {'the', 'from', 'news', 'latest', 'about', 'technologies', 'technology', 
+                      'cloud', 'services', 'service', 'platform', 'platforms', 'recent', 'new',
+                      'with', 'for', 'in', 'on', 'at', 'to', 'of', 'by', 'as', 'is', 'are', 'was',
+                      'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+                      'would', 'should', 'could', 'may', 'might', 'must', 'can'}
+        
+        # Prepositions to strip from entity boundaries
+        prepositions = ['from', 'with', 'for', 'about', 'of', 'in', 'on', 'at', 'to', 'by']
+        
+        unique_items = []
+        seen = set()
+        
+        for item in items:
+            item_clean = item.lower().strip()
+            
+            # Strip leading prepositions (e.g., "of azure" → "azure")
+            for prep in prepositions:
+                if item_clean.startswith(prep + ' '):
+                    item_clean = item_clean[len(prep) + 1:].strip()
+                # Also strip trailing prepositions (e.g., "azure of" → "azure")
+                if item_clean.endswith(' ' + prep):
+                    item_clean = item_clean[:-(len(prep) + 1)].strip()
+            
+            # Skip stop words, very short terms, and duplicates
+            if (item_clean not in stop_words and 
+                len(item_clean) > 2 and 
+                item_clean not in seen):
+                unique_items.append(item_clean)
+                seen.add(item_clean)
+        
+        return unique_items
 
     # =========================================================================
     # Content-Type Detection and Analysis (Phase 2)
